@@ -1,0 +1,111 @@
+---
+title: "Untitled"
+author: "Sai Sony Malapati"
+date: "2026-03-09"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+# Load the tidyverse package 
+library(tidyverse)
+
+# 1. Load the dataset
+co2_raw <- read_csv("cleaned_co2_data_20vars.csv")
+
+# 2. Filter years, clean regions, and select EXACTLY 20 variables
+clean_co2 <- co2_raw %>%
+  # Keep only actual countries
+  filter(!is.na(iso_code)) %>%
+  
+  # Filter for the year 1990 onwards
+  filter(year >= 1990) %>%
+  
+  # Select 20 variables:
+  select(
+    # --- Identifiers (3) ---
+    country, year, iso_code, 
+    
+    # --- Economics & Demographics (2) ---
+    population, gdp, 
+    
+    # --- Energy (3) ---
+    primary_energy_consumption, energy_per_capita, energy_per_gdp,
+    
+    # --- Overall Emissions (4) ---
+    co2, co2_per_capita, total_ghg, consumption_co2,
+    
+    # --- Gas/Emission Types (5) ---
+    methane, nitrous_oxide, cement_co2, flaring_co2, trade_co2,
+    
+    # --- Source Specific (3) ---
+    coal_co2, gas_co2, oil_co2
+  )
+
+# 3. Handle Missing Values (Keep only rows that have data for all 20 variables)
+final_clean_data_20 <- clean_co2 %>%
+  drop_na()
+
+# 4. Verify the final dataset
+cat("\nDimensions of the 20-variable cleaned dataset:\n")
+dim(final_clean_data_20)
+
+# Save the brand new 20-variable dataset to your computer
+write_csv(final_clean_data_20, "cleaned_co2_data_20vars.csv")
+sum(is.na(final_clean_data_20))
+```
+```{r}
+```
+
+
+```{r}
+summary(co2_raw)
+```
+
+```{r}
+library(ggplot2)
+```
+
+
+```{r}
+ggplot(co2_raw, aes(x = co2_per_capita)) +
+  geom_histogram(bins = 30) +
+  theme_minimal()
+```
+
+
+```{r}
+ggplot(co2_raw, aes(x = gdp, y = co2_per_capita)) +
+  geom_point(alpha = 0.5) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(co2_raw, aes(x = year, y = co2)) +
+  geom_line() +
+  theme_minimal()
+```
+```{r}
+library(corrplot)
+
+cor_matrix <- cor(co2_raw[, sapply(co2_raw, is.numeric)])
+corrplot(cor_matrix, method = "color")
+```
+```{r}
+ggplot(co2_raw, aes(x = coal_co2)) +
+  geom_histogram(bins = 30)
+```
+```{r}
+ggplot(co2_raw, aes(y = co2_per_capita)) +
+  geom_boxplot()
+```
+```{r}
+ggplot(co2_raw, aes(x = country, y = co2_per_capita)) +
+  geom_boxplot()
+```
+
