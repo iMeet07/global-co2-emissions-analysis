@@ -1,0 +1,12 @@
+# Core (required for plan.md pipeline in co2_modeling.ipynb)
+pandas>=1.3
+numpy>=1.20
+matplotlib>=3.4
+scikit-learn>=1.0
+scipy>=1.7
+torch>=1.9
+# For RTX 50 series (Blackwell/sm_120): use GPU with CUDA 12.8:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# Optional: for LSTM section in the notebook (replaced by manual LSTM)
+# tensorflow>=2.10
