@@ -1,0 +1,220 @@
+---
+title: "AMS 597 PROJECT EDA"
+author: "Group 9"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Exploratory Data Analysis (EDA)
+```{r}
+
+# DATA LOADING & CLEANING
+# Purpose: Prepare dataset for analysis
+
+library(tidyverse)
+library(corrplot)
+
+# Load dataset
+co2_raw <- read_csv("~/Downloads/cleaned_co2_data_20vars.csv", show_col_types = FALSE)
+
+# Filter and select variables
+clean_co2 <- co2_raw %>%
+  filter(!is.na(iso_code)) %>%   # Keep only countries
+  filter(year >= 1990) %>%       # Focus on modern data
+  select(
+    country, year, iso_code,
+    population, gdp,
+    primary_energy_consumption, energy_per_capita, energy_per_gdp,
+    co2, co2_per_capita, total_ghg, consumption_co2,
+    methane, nitrous_oxide, cement_co2, flaring_co2, trade_co2,
+    coal_co2, gas_co2, oil_co2
+  )
+
+# Remove missing values
+final_clean_data_20 <- clean_co2 %>% drop_na()
+
+# Check dataset
+dim(final_clean_data_20)
+sum(is.na(final_clean_data_20))
+```
+
+```{r}
+
+# SUMMARY STATISTICS
+# Purpose: Understand data distribution
+
+summary(final_clean_data_20)
+```
+
+```{r}
+
+# DISTRIBUTION ANALYSIS
+# Purpose: Explore CO2 distribution
+
+ggplot(final_clean_data_20, aes(x = co2_per_capita)) +
+  geom_histogram(bins = 30, fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Distribution of CO2 per Capita")
+```
+# Interpretation:
+The distribution of CO2 per capita is highly right-skewed. Most countries have low emissions (typically below 10), while a small number of countries Exhibit extremely high emissions, creating a long tail. This indicates inequality in emissions across countries and suggests the presence of outliers.
+```{r}
+# CO2 Distribution Boxplot
+# Purpose: Identify outliers
+
+ggplot(final_clean_data_20, aes(x = "", y = co2_per_capita)) +
+  geom_boxplot(fill = "lightblue", outlier.color = "red") +
+  theme_minimal() +
+  labs(
+    title = "CO2 Distribution (Boxplot)",
+    x = "",
+    y = "CO2 per Capita"
+  )
+```
+
+# Interpretation:
+The boxplot confirms the presence of significant outliers in CO2 emissions. The majority of countries fall within a low emission range, while a few countries. Have extremely high CO2 per capita values. This reinforces that global emissions are unevenly distributed across countries.
+
+```{r}
+
+# GDP vs CO2 RELATIONSHIP
+# Purpose: Understand economic impact on emissions
+
+ggplot(final_clean_data_20, aes(x = gdp, y = co2_per_capita)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  theme_minimal() +
+  labs(title = "GDP vs CO2 per Capita")
+```
+# Interpretation:
+There is a positive relationship between GDP and CO2 emissions.However, the spread is very wide, especially at lower GDP levels, indicating that GDP alone does not fully explain emissions. Some low-GDP countries still exhibit relatively high emissions.
+
+```{r}
+# GDP vs CO2 (Log Scale)
+# Purpose: Handle skewed GDP distribution
+
+ggplot(final_clean_data_20, aes(x = gdp, y = co2_per_capita)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  scale_x_log10() +
+  geom_smooth(method = "lm", color = "orange") +
+  theme_minimal() +
+  labs(title = "GDP vs CO2 (Log Scale)")
+```
+# Interpretation:
+After applying a log scale, the relationship between GDP and CO2 becomes clearer. A more consistent upward trend is observed, suggesting that economic growth is associated with increased emissions. This transformation improves interpretability by reducing skewness in GDP.
+
+```{r}
+
+# ENERGY vs CO2 (IMPORTANT INSIGHT)
+# Purpose: Identify main driver of emissions
+
+ggplot(final_clean_data_20, aes(x = energy_per_capita, y = co2_per_capita)) +
+  geom_point(alpha = 0.4, color = "purple") +
+  geom_smooth(method = "lm", color = "red") +
+  theme_minimal() +
+  labs(title = "Energy Consumption vs CO2 Emissions")
+```
+# Interpretation:
+A strong positive linear relationship is observed between energy consumption and CO2 emissions. This indicates that energy usage is the primary driver of emissions, making it the most important predictor in the dataset.
+
+```{r}
+
+# GLOBAL TREND ANALYSIS
+# Purpose: Analyze emissions over time
+
+global_trends <- final_clean_data_20 %>%
+  group_by(year) %>%
+  summarise(total_global_co2 = sum(co2, na.rm = TRUE))
+
+ggplot(global_trends, aes(x = year, y = total_global_co2)) +
+  geom_line(color = "firebrick") +
+  theme_minimal() +
+  labs(title = "Global CO2 Emissions Trend")
+```
+# Interpretation:
+Global CO2 emissions have steadily increased over time, reflecting industrialization and growing energy demand worldwide. A slight dip is observed in recent years, possibly due to global events or policy changes, but the overall trend remains upward.
+
+```{r}
+
+# TOP 5 COUNTRIES ANALYSIS
+# Purpose: Identify major contributors
+
+latest_year <- max(final_clean_data_20$year)
+
+top_5_countries <- final_clean_data_20 %>%
+  filter(year == latest_year) %>%
+  slice_max(order_by = co2, n = 5) %>%
+  pull(country)
+
+final_clean_data_20 %>%
+  filter(country %in% top_5_countries) %>%
+  ggplot(aes(x = year, y = co2, color = country)) +
+  geom_line() +
+  theme_minimal() +
+  labs(title = "Top 5 CO2 Emitting Countries")
+```
+# Interpretation:
+A small number of countries dominate global CO2 emissions. China shows a rapid increase over time, becoming the largest emitter. The United States remains consistently high, while countries like India show steady growth.
+```{r}
+# Top 10 Countries Comparison
+# Purpose: Better comparison of major emitters
+
+top10 <- final_clean_data_20 %>%
+  filter(year == latest_year) %>%
+  slice_max(co2, n = 10)
+
+ggplot(top10, aes(x = reorder(country, co2), y = co2)) +
+  geom_col(fill = "darkred") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 CO2 Emitting Countries")
+```
+# Interpretation:
+The bar chart highlights the concentration of emissions among a few countries. China and the United States contribute significantly more emissions compared to others, indicating that global emission reduction efforts must focus on major contributors.
+```{r}
+
+# EMISSION SOURCE BREAKDOWN
+# Purpose: Compare coal, oil, gas contributions
+
+source_data <- final_clean_data_20 %>%
+  filter(year == latest_year, country %in% top_5_countries) %>%
+  select(country, coal_co2, gas_co2, oil_co2) %>%
+  pivot_longer(cols = c(coal_co2, gas_co2, oil_co2),
+               names_to = "source",
+               values_to = "value")
+
+ggplot(source_data, aes(x = country, y = value, fill = source)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal() +
+  labs(title = "Emission Sources by Country")
+```
+# Interpretation:
+Coal, oil, and gas are the primary contributors to CO2 emissions. Coal appears to be the dominant source for some countries (e.g., China), while oil and gas play a larger role in others. This suggests differences in energy structure across countries.
+```{r}
+
+# CORRELATION ANALYSIS
+# Purpose: Identify relationships between variables
+
+numeric_vars <- final_clean_data_20 %>%
+  select(-country, -iso_code, -year)
+
+cor_matrix <- cor(numeric_vars)
+
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         tl.col = "black",
+         tl.srt = 45)
+```
+# Interpretation:
+Strong positive correlations are observed between CO2 emissions and energy-related variables, especially energy consumption and fossil fuel usage. GDP also shows a positive correlation with emissions. These relationships confirm that economic activity and energy use are key drivers of CO2 emissions.
+
+# FINAL INSIGHTS
+
+- CO2 emissions are strongly driven by energy consumption.
+- GDP is positively correlated with emissions.
+- A small number of countries dominate global emissions.
+- Fossil fuels (coal, oil, gas) are the primary emission sources.
