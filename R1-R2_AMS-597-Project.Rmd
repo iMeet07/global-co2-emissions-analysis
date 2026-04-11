@@ -1,0 +1,451 @@
+---
+title: "CO2 Emissions Analysis: Regression and Clustering"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+author: "Group-9"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#  Introduction
+
+This analysis investigates global CO2 emissions using statistical and machine learning techniques.
+Two main research questions are addressed:
+
+1. **R1:** What factors influence CO2 emissions per capita?
+2. **R2:** Can countries be grouped based on emission patterns?
+
+---
+
+#  Data Preparation
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(glmnet)
+library(caret)
+library(factoextra)
+library(cluster)
+library(knitr)
+
+# Load dataset
+df <- read.csv("~/Downloads/cleaned_co2_data_20vars.csv")
+
+# Display structure
+str(df)
+```
+
+
+# Exploratory Data Analysis (EDA)
+
+```{r}
+
+# Exploratory Data Analysis (EDA)
+# Purpose: Understand relationship between GDP and CO2 emissions
+
+ggplot(df, aes(x = gdp, y = co2_per_capita)) +
+  geom_point(alpha = 0.4, color = "darkgreen") +
+  geom_smooth(method = "lm", color = "red") +
+  labs(
+    title = "Relationship Between GDP and CO2 Emissions",
+    subtitle = "Higher GDP is generally associated with higher emissions",
+    x = "GDP",
+    y = "CO2 Emissions per Capita"
+  ) +
+  theme_minimal()
+```
+
+---
+
+#  Research Question 1: Regression Analysis
+
+## Purpose
+
+To understand how GDP, population, and energy consumption affect CO₂ emissions.
+
+```{r}
+
+# Data Selection and Cleaning
+
+df_model <- df %>%
+  select(co2_per_capita, gdp, population, energy_per_capita) %>%
+  na.omit()
+
+# Train-test split
+set.seed(123)
+trainIndex <- createDataPartition(df_model$co2_per_capita, p = 0.8, list = FALSE)
+
+train_data <- df_model[trainIndex, ]
+test_data  <- df_model[-trainIndex, ]
+```
+
+
+```{r}
+
+# Correlation Analysis
+# Purpose: Understand relationships between variables
+
+library(corrplot)
+
+cor_matrix <- cor(df_model)
+corrplot(cor_matrix, method = "color", tl.cex = 0.8)
+```
+---
+
+##  Model 1: OLS Regression
+
+```{r}
+# Fit OLS model
+ols_model <- lm(co2_per_capita ~ gdp + population + energy_per_capita, data = train_data)
+
+# Predictions
+ols_pred <- predict(ols_model, newdata = test_data)
+
+# Evaluation metrics
+ols_rmse <- sqrt(mean((test_data$co2_per_capita - ols_pred)^2))
+ols_r2   <- cor(test_data$co2_per_capita, ols_pred)^2
+ols_mae  <- mean(abs(test_data$co2_per_capita - ols_pred))
+
+
+# OLS Model Summary (Interpretation of coefficients)
+
+summary(ols_model)
+
+
+# Multicollinearity Check
+# Purpose: Ensure predictors are not highly correlated
+
+library(car)
+vif(ols_model)
+```
+
+---
+
+##  Model 2: Ridge Regression
+
+```{r}
+# Prepare matrix format for glmnet
+X_train <- model.matrix(co2_per_capita ~ gdp + population + energy_per_capita, train_data)[,-1]
+y_train <- train_data$co2_per_capita
+
+X_test <- model.matrix(co2_per_capita ~ gdp + population + energy_per_capita, test_data)[,-1]
+y_test <- test_data$co2_per_capita
+
+# Train Ridge model
+ridge_model <- cv.glmnet(X_train, y_train, alpha = 0)
+
+# Predictions
+ridge_pred <- predict(ridge_model, s = "lambda.min", newx = X_test)
+
+# Metrics
+ridge_rmse <- sqrt(mean((y_test - ridge_pred)^2))
+ridge_r2   <- cor(y_test, ridge_pred)^2
+ridge_mae  <- mean(abs(y_test - ridge_pred))
+```
+
+---
+
+##  Model 3: Lasso Regression
+
+```{r}
+# Train Lasso model
+lasso_model <- cv.glmnet(X_train, y_train, alpha = 1)
+
+# Predictions
+lasso_pred <- predict(lasso_model, s = "lambda.min", newx = X_test)
+
+# Metrics
+lasso_rmse <- sqrt(mean((y_test - lasso_pred)^2))
+lasso_r2   <- cor(y_test, lasso_pred)^2
+lasso_mae  <- mean(abs(y_test - lasso_pred))
+
+# Feature Importance from Lasso
+
+coef(lasso_model, s = "lambda.min")
+```
+
+---
+
+##  Model Comparison
+
+```{r}
+results <- data.frame(
+  Model = c("OLS", "Ridge", "Lasso"),
+  RMSE  = c(ols_rmse, ridge_rmse, lasso_rmse),
+  R2    = c(ols_r2, ridge_r2, lasso_r2),
+  MAE   = c(ols_mae, ridge_mae, lasso_mae)
+)
+
+kable(results, caption = "Model Comparison (RMSE, R², MAE)")
+
+cat("Best Model Based on RMSE:", results$Model[which.min(results$RMSE)])
+```
+
+---
+
+##  Visualization: Model Performance
+
+```{r}
+# Create dataset for plotting
+plot_df <- data.frame(actual = y_test, predicted = as.numeric(lasso_pred))
+
+# Plot
+ggplot(plot_df, aes(x = actual, y = predicted)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Actual vs Predicted CO2 Emissions (Lasso Model)",
+    x = "Actual CO2",
+    y = "Predicted CO2",
+    caption = "Red dashed line indicates perfect predictions"
+  ) +
+  theme_minimal()
+```
+```{r}
+
+# Residual Diagnostics
+# Purpose: Check model assumptions (normality, homoscedasticity)
+
+par(mfrow=c(2,2))
+plot(ols_model)
+```
+
+---
+
+##  Interpretation (R1)
+
+Lasso regression slightly outperformed both OLS and Ridge models in terms of R² and RMSE.
+
+This indicates that Lasso’s regularization helps reduce overfitting and improves generalization performance.
+
+The regression coefficients from the OLS model show that energy consumption per capita has a strong positive 
+and statistically significant effect on CO₂ emissions. GDP also contributes positively, while population 
+is not statistically significant in this model.
+
+This suggests that energy usage is the primary driver of emissions rather than population size alone.
+
+Additionally, Lasso regression highlights the most important predictors by shrinking less relevant variablestoward zero, reinforcing the importance of energy-related variables in explaining emissions.
+
+The consistency across OLS, Ridge, and Lasso models suggests a robust linear relationship between energy consumption and CO₂ emissions.
+---
+
+# Research Question 2: Clustering Analysis
+
+## Purpose
+
+To group countries based on emission characteristics and identify patterns in CO₂ emissions.
+
+```{r}
+
+# STEP 1: Feature Selection and Data Scaling
+# Purpose: Select relevant emission-related variables
+
+df_cluster <- df %>%
+  select(co2_per_capita, total_ghg, methane, coal_co2, oil_co2, gas_co2) %>%
+  na.omit()
+
+# Standardize features (important for clustering)
+df_scaled <- scale(df_cluster)
+```
+
+---
+
+```{r}
+
+# STEP 2: PCA (Dimensionality Reduction)
+# Purpose: Understand variance and visualize clusters
+
+pca <- prcomp(df_scaled)
+
+# Scree plot
+fviz_eig(pca) +
+  labs(
+    title = "Scree Plot: Variance Explained by Principal Components",
+    x = "Principal Components",
+    y = "Percentage of Variance Explained"
+  ) +
+  theme_minimal()
+```
+
+---
+
+```{r}
+
+# STEP 3: Determine Optimal Number of Clusters
+
+# Elbow Method
+fviz_nbclust(df_scaled, kmeans, method = "wss") +
+  labs(
+    title = "Elbow Method for Optimal Number of Clusters",
+    x = "Number of Clusters (k)",
+    y = "Within-Cluster Sum of Squares"
+  ) +
+  theme_minimal()
+
+# Silhouette Method
+fviz_nbclust(df_scaled, kmeans, method = "silhouette") +
+  labs(
+    title = "Optimal Clusters using Silhouette Method"
+  ) +
+  theme_minimal()
+```
+
+---
+
+```{r}
+
+# STEP 4: Compare Different K Values
+# Purpose: Validate best number of clusters
+
+for(k in 2:4){
+  km <- kmeans(df_scaled, centers = k, nstart = 25)
+  sil <- silhouette(km$cluster, dist(df_scaled))
+  cat("k =", k, "Average Silhouette =", mean(sil[,3]), "\n")
+}
+```
+
+---
+
+```{r}
+
+# STEP 5: Final K-Means Model (k = 3)
+
+set.seed(123)
+kmeans_result <- kmeans(df_scaled, centers = 3, nstart = 25)
+
+df_cluster$cluster <- kmeans_result$cluster
+```
+
+---
+
+```{r}
+
+# STEP 6: Label Clusters (Low / Medium / High Emissions)
+# Purpose: Make clusters interpretable
+
+cluster_summary <- df_cluster %>%
+  group_by(cluster) %>%
+  summarise(co2_mean = mean(co2_per_capita))
+
+# Sort clusters by emission level
+cluster_summary <- cluster_summary %>%
+  arrange(co2_mean)
+
+cluster_summary
+
+# Assign labels
+labels <- c("Low Emissions", "Medium Emissions", "High Emissions")
+
+cluster_summary$label <- labels
+
+# Map labels back to dataset
+df_cluster$cluster_label <- factor(
+  cluster_summary$label[match(df_cluster$cluster, cluster_summary$cluster)],
+  levels = labels
+)
+```
+
+---
+
+```{r}
+
+# STEP 7: PCA Visualization with Meaningful Labels
+
+pca_data <- as.data.frame(pca$x)
+pca_data$cluster_label <- df_cluster$cluster_label
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = cluster_label)) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(
+    title = "Country Clusters Based on CO2 Emissions",
+    subtitle = "Clusters categorized as Low, Medium, and High Emissions",
+    x = "Principal Component 1",
+    y = "Principal Component 2",
+    color = "Emission Level"
+  ) +
+  theme_minimal()
+```
+
+---
+
+```{r}
+
+# STEP 8: Silhouette Analysis
+# Purpose: Evaluate clustering quality
+
+library(cluster)
+
+sil <- silhouette(kmeans_result$cluster, dist(df_scaled))
+
+# Average silhouette score
+avg_sil <- mean(sil[,3])
+cat("Average Silhouette Score:", avg_sil, "\n")
+
+# Silhouette plot
+fviz_silhouette(sil) +
+  labs(
+    title = "Silhouette Plot for K-Means Clustering",
+    subtitle = "Higher values indicate better-defined clusters",
+    x = "Cluster",
+    y = "Silhouette Width"
+  ) +
+  theme_minimal()
+```
+
+---
+
+```{r}
+
+# STEP 9: Cluster Summary (Interpretation Table)
+
+df_cluster %>%
+  group_by(cluster_label) %>%
+  summarise(across(everything(), mean))
+```
+
+---
+
+# 🧠 Interpretation (R2)
+
+The clustering results reveal clear segmentation of countries into three emission categories.
+
+The "High Emissions" cluster is characterized by significantly higher energy consumption and greenhouse gas levels, 
+indicating industrialized or highly developed economies.
+
+The "Medium Emissions" cluster represents transitional economies with moderate energy usage and emissions.
+
+The "Low Emissions" cluster consists of countries with minimal industrial activity and lower environmental impact.
+
+The average silhouette score (~0.58) indicates reasonably well-separated clusters. However, the presence of a cluster 
+with lower silhouette values suggests some overlap between emission groups, particularly among medium-emission countries.
+
+This indicates that while clustering captures general patterns effectively, emission behavior exists on a spectrum 
+rather than in strictly separated categories.
+
+---
+
+# Limitations
+
+This analysis assumes linear relationships in regression models, which may not fully capture 
+complex interactions between variables.
+
+Additionally, clustering results depend on feature selection and scaling, and alternative methods 
+such as hierarchical clustering or DBSCAN may produce different groupings.
+
+Future work could include non-linear modeling approaches and time-series analysis to better understand 
+temporal emission patterns.
+
+---
+
+# Conclusion
+
+This analysis demonstrates that energy consumption is the dominant driver of CO₂ emissions.
+
+Regression models show strong predictive performance, with Lasso providing slightly better generalization due to regularization.
+
+Clustering reveals meaningful groupings of countries into low, medium, and high emission categories, highlighting global disparities in environmental impact.
+
+Overall, this study demonstrates the effectiveness of combining statistical modeling and unsupervised learning to analyze complex global environmental data.
