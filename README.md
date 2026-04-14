@@ -8,6 +8,7 @@ Statistical analysis and modeling of global CO₂ and greenhouse gas emissions u
 
 - **Source:** Our World in Data CO₂/GHG emissions (see [dataset.md](dataset.md)).
 - **Cleaning:** [data_clean.Rmd](data_clean.Rmd) — years ≥ 1990, valid `iso_code`, 20 variables, complete cases only.
+- **EDA report:** [eda_co2.Rmd](eda_co2.Rmd) — advanced exploratory analysis with reproducible figures/tables.
 - **File:** [cleaned_co2_data_20vars.csv](cleaned_co2_data_20vars.csv) — ~2,640 country-year rows, 20 columns.
 - **Variables:** 3 IDs (`country`, `year`, `iso_code`); 17 numeric (economics, energy, emissions). **Target:** `co2` (total CO₂ emissions).
 - **Predictors (15 columns):** `population`, `gdp`, `primary_energy_consumption`, `energy_per_capita`, `energy_per_gdp`, `total_ghg`, `consumption_co2`, `methane`, `nitrous_oxide`, `cement_co2`, `flaring_co2`, `trade_co2`, `coal_co2`, `gas_co2`, `oil_co2`. We do **not** use `co2` or `co2_per_capita` as predictors (co2_per_capita = co2/population would leak into predicting co2). All models predict **co2** from these 15 features.
@@ -27,6 +28,30 @@ pip install --upgrade torch torchvision torchaudio --index-url https://download.
 ```
 
 The notebook uses CUDA when available and compatible; otherwise it falls back to CPU.
+
+---
+
+## EDA Report
+
+Run the standalone EDA report:
+
+```bash
+Rscript -e "rmarkdown::render('eda_co2.Rmd', output_format = 'html_document')"
+```
+
+What it covers:
+
+- Data quality checks (schema, missingness, duplicates)
+- Distribution diagnostics (`co2` raw + log-transformed)
+- Time trends and concentration of emissions
+- GDP/energy relationship analysis
+- Source composition shifts (coal/gas/oil shares over time)
+- Correlation and multicollinearity diagnostics
+
+EDA outputs are saved as:
+
+- Figures: `output/figures/eda_*.png`
+- Tables: `output/tables/eda_*.csv`
 
 ---
 

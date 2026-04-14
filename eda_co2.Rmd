@@ -1,0 +1,372 @@
+---
+title: "Outstanding EDA: Global CO2 Emissions Panel"
+author: "Statistical Computing Project"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  dpi = 150
+)
+```
+
+## 1) Libraries and helpers
+
+```{r libraries}
+library(tidyverse)
+library(scales)
+library(corrplot)
+
+if (!dir.exists("output")) dir.create("output", recursive = TRUE)
+if (!dir.exists("output/figures")) dir.create("output/figures", recursive = TRUE)
+if (!dir.exists("output/tables")) dir.create("output/tables", recursive = TRUE)
+
+theme_set(
+  theme_minimal(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold", size = 15),
+      plot.subtitle = element_text(size = 11),
+      axis.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+)
+
+save_plot <- function(plot_obj, filename, width = 10, height = 6) {
+  ggsave(
+    filename = file.path("output/figures", filename),
+    plot = plot_obj,
+    width = width,
+    height = height,
+    dpi = 150
+  )
+}
+```
+
+## 2) Load data and validate schema
+
+```{r load-data}
+co2 <- read_csv("cleaned_co2_data_20vars.csv", show_col_types = FALSE)
+
+expected_cols <- c(
+  "country", "year", "iso_code", "population", "gdp",
+  "primary_energy_consumption", "energy_per_capita", "energy_per_gdp",
+  "co2", "co2_per_capita", "total_ghg", "consumption_co2",
+  "methane", "nitrous_oxide", "cement_co2", "flaring_co2", "trade_co2",
+  "coal_co2", "gas_co2", "oil_co2"
+)
+
+stopifnot(all(expected_cols %in% names(co2)))
+stopifnot(ncol(co2) == length(expected_cols))
+
+glimpse(co2)
+```
+
+```{r dataset-at-a-glance}
+data_snapshot <- tibble(
+  n_rows = nrow(co2),
+  n_columns = ncol(co2),
+  n_countries = n_distinct(co2$country),
+  first_year = min(co2$year, na.rm = TRUE),
+  last_year = max(co2$year, na.rm = TRUE)
+)
+
+knitr::kable(data_snapshot, caption = "Dataset at a glance")
+write_csv(data_snapshot, "output/tables/eda_data_snapshot.csv")
+```
+
+## 3) Data quality checks
+
+```{r quality-checks}
+missing_summary <- co2 %>%
+  summarise(across(everything(), ~ sum(is.na(.x)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_count") %>%
+  mutate(missing_pct = missing_count / nrow(co2))
+
+knitr::kable(
+  missing_summary %>% arrange(desc(missing_count)),
+  caption = "Missing values by variable"
+)
+
+duplicate_rows <- sum(duplicated(co2))
+cat("Duplicate rows:", duplicate_rows, "\n")
+```
+
+## 4) Univariate profile of key variables
+
+```{r numeric-summary}
+numeric_summary <- co2 %>%
+  summarise(
+    across(
+      where(is.numeric),
+      list(
+        min = ~ min(.x, na.rm = TRUE),
+        p25 = ~ quantile(.x, 0.25, na.rm = TRUE),
+        median = ~ median(.x, na.rm = TRUE),
+        mean = ~ mean(.x, na.rm = TRUE),
+        p75 = ~ quantile(.x, 0.75, na.rm = TRUE),
+        max = ~ max(.x, na.rm = TRUE),
+        sd = ~ sd(.x, na.rm = TRUE)
+      ),
+      .names = "{.col}__{.fn}"
+    )
+  ) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = c("variable", "stat"),
+    names_sep = "__",
+    values_to = "value"
+  ) %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  arrange(variable)
+
+knitr::kable(numeric_summary, digits = 3, caption = "Numerical summary statistics")
+write_csv(numeric_summary, "output/tables/eda_numeric_summary.csv")
+```
+
+```{r target-distribution}
+p_target <- ggplot(co2, aes(x = co2)) +
+  geom_histogram(bins = 45, fill = "#0B7285", color = "white", alpha = 0.9) +
+  scale_x_continuous(labels = label_number_si()) +
+  labs(
+    title = "Distribution of Total CO2 Emissions",
+    subtitle = "Strong right skew is expected in country-level emissions",
+    x = "CO2 emissions",
+    y = "Count"
+  )
+
+save_plot(p_target, "eda_target_distribution.png")
+p_target
+```
+
+```{r target-distribution-log}
+p_target_log <- ggplot(co2, aes(x = log1p(co2))) +
+  geom_histogram(bins = 45, fill = "#F08C00", color = "white", alpha = 0.9) +
+  labs(
+    title = "Log-Transformed CO2 Distribution",
+    subtitle = "Log transform reveals the body of the distribution clearly",
+    x = "log(1 + CO2)",
+    y = "Count"
+  )
+
+save_plot(p_target_log, "eda_target_distribution_log.png")
+p_target_log
+```
+
+## 5) Time dynamics and concentration patterns
+
+```{r global-trend}
+global_trend <- co2 %>%
+  group_by(year) %>%
+  summarise(
+    global_co2 = sum(co2, na.rm = TRUE),
+    median_country_co2 = median(co2, na.rm = TRUE),
+    q10_country_co2 = quantile(co2, 0.10, na.rm = TRUE),
+    q90_country_co2 = quantile(co2, 0.90, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+p_global <- ggplot(global_trend, aes(x = year)) +
+  geom_ribbon(
+    aes(ymin = q10_country_co2, ymax = q90_country_co2),
+    fill = "#A5D8FF", alpha = 0.35
+  ) +
+  geom_line(aes(y = median_country_co2, color = "Median country CO2"), linewidth = 1.1) +
+  geom_line(aes(y = global_co2 / 100, color = "Global total CO2 / 100"), linewidth = 1.1) +
+  scale_color_manual(values = c("Median country CO2" = "#0C8599", "Global total CO2 / 100" = "#C92A2A")) +
+  scale_y_continuous(labels = label_number_si()) +
+  labs(
+    title = "CO2 Through Time: Global Growth and Country Dispersion",
+    subtitle = "Ribbon shows country 10th to 90th percentile range each year",
+    x = "Year",
+    y = "Emissions (scaled)",
+    color = NULL
+  )
+
+save_plot(p_global, "eda_global_trend.png")
+p_global
+```
+
+```{r top-emitters-latest-year}
+latest_year <- max(co2$year, na.rm = TRUE)
+
+top_emitters <- co2 %>%
+  filter(year == latest_year) %>%
+  arrange(desc(co2)) %>%
+  slice_head(n = 15) %>%
+  mutate(country = fct_reorder(country, co2))
+
+p_top <- ggplot(top_emitters, aes(x = country, y = co2)) +
+  geom_col(fill = "#2B8A3E", alpha = 0.9) +
+  coord_flip() +
+  scale_y_continuous(labels = label_number_si()) +
+  labs(
+    title = paste("Top 15 Emitters in", latest_year),
+    subtitle = "Concentration among a small group of countries is substantial",
+    x = NULL,
+    y = "CO2 emissions"
+  )
+
+save_plot(p_top, "eda_top_emitters_latest_year.png")
+p_top
+```
+
+## 6) Relationship diagnostics
+
+```{r gdp-and-energy-relationships}
+co2_rel <- co2 %>%
+  mutate(
+    gdp_per_capita = gdp / population,
+    co2_intensity = co2 / pmax(gdp, 1e-9)
+  )
+
+p_gdp_pc <- ggplot(co2_rel, aes(x = gdp_per_capita, y = co2_per_capita)) +
+  geom_point(alpha = 0.35, color = "#1971C2") +
+  geom_smooth(method = "loess", se = FALSE, color = "#0B7285", linewidth = 1.1) +
+  scale_x_continuous(trans = "log10", labels = label_number_si()) +
+  scale_y_continuous(labels = label_number(accuracy = 0.1)) +
+  labs(
+    title = "Economic Development and CO2 per Capita",
+    subtitle = "Nonlinear pattern: emissions rise with income, then flatten for high-income countries",
+    x = "GDP per capita (log scale)",
+    y = "CO2 per capita"
+  )
+
+save_plot(p_gdp_pc, "eda_gdp_per_capita_vs_co2_per_capita.png")
+p_gdp_pc
+```
+
+```{r energy-efficiency}
+p_efficiency <- ggplot(co2_rel, aes(x = energy_per_gdp, y = co2_per_capita)) +
+  geom_point(alpha = 0.35, color = "#5F3DC4") +
+  geom_smooth(method = "lm", se = TRUE, color = "#3B5BDB", linewidth = 1.0) +
+  scale_x_continuous(labels = label_number_si()) +
+  labs(
+    title = "Energy Intensity vs CO2 per Capita",
+    subtitle = "Higher energy needed per GDP unit is generally associated with higher CO2 per capita",
+    x = "Energy per GDP",
+    y = "CO2 per capita"
+  )
+
+save_plot(p_efficiency, "eda_energy_per_gdp_vs_co2_per_capita.png")
+p_efficiency
+```
+
+## 7) Source composition and structural shifts
+
+```{r source-shares-over-time}
+source_mix <- co2 %>%
+  group_by(year) %>%
+  summarise(
+    coal = sum(coal_co2, na.rm = TRUE),
+    gas = sum(gas_co2, na.rm = TRUE),
+    oil = sum(oil_co2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = c(coal, gas, oil), names_to = "source", values_to = "co2_from_source") %>%
+  group_by(year) %>%
+  mutate(source_share = co2_from_source / sum(co2_from_source)) %>%
+  ungroup()
+
+p_mix <- ggplot(source_mix, aes(x = year, y = source_share, fill = source)) +
+  geom_area(alpha = 0.92, color = "white", linewidth = 0.15) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c(coal = "#343A40", gas = "#339AF0", oil = "#F08C00")) +
+  labs(
+    title = "Global Fossil CO2 Composition Over Time",
+    subtitle = "Shares from coal, gas, and oil (aggregated across countries)",
+    x = "Year",
+    y = "Share of fossil-source CO2",
+    fill = "Source"
+  )
+
+save_plot(p_mix, "eda_source_composition_area.png")
+write_csv(source_mix, "output/tables/eda_source_mix_by_year.csv")
+p_mix
+```
+
+## 8) Correlation structure and multicollinearity signals
+
+```{r correlation}
+numeric_data <- co2 %>% select(where(is.numeric))
+corr_mat <- cor(numeric_data, use = "pairwise.complete.obs")
+
+corrplot(
+  corr_mat,
+  method = "color",
+  type = "lower",
+  order = "hclust",
+  tl.col = "black",
+  tl.cex = 0.7,
+  addCoef.col = "black",
+  number.cex = 0.5
+)
+
+write_csv(
+  as_tibble(as.table(corr_mat), .name_repair = "minimal") %>%
+    rename(var1 = Var1, var2 = Var2, corr = n),
+  "output/tables/eda_correlation_long.csv"
+)
+```
+
+```{r strongest-correlations}
+strong_corr <- as_tibble(as.table(corr_mat), .name_repair = "minimal") %>%
+  rename(var1 = Var1, var2 = Var2, corr = n) %>%
+  filter(var1 != var2) %>%
+  mutate(pair = if_else(var1 < var2, paste(var1, var2, sep = " | "), paste(var2, var1, sep = " | "))) %>%
+  group_by(pair) %>%
+  summarise(var1 = first(var1), var2 = first(var2), corr = first(corr), .groups = "drop") %>%
+  mutate(abs_corr = abs(corr)) %>%
+  arrange(desc(abs_corr)) %>%
+  slice_head(n = 15)
+
+knitr::kable(strong_corr, digits = 3, caption = "Top 15 absolute correlations")
+write_csv(strong_corr, "output/tables/eda_top_correlations.csv")
+```
+
+## 9) Country-level risk and intensity diagnostics
+
+```{r country-intensity}
+country_profile <- co2_rel %>%
+  group_by(country, iso_code) %>%
+  summarise(
+    avg_co2 = mean(co2, na.rm = TRUE),
+    avg_co2_per_capita = mean(co2_per_capita, na.rm = TRUE),
+    avg_co2_intensity = mean(co2_intensity, na.rm = TRUE),
+    years_observed = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(avg_co2_per_capita))
+
+knitr::kable(head(country_profile, 15), digits = 3, caption = "Top 15 countries by average CO2 per capita")
+write_csv(country_profile, "output/tables/eda_country_profile.csv")
+```
+
+## 10) EDA conclusions for modeling decisions
+
+1. **Heavy skew and scale heterogeneity:** `co2`, `gdp`, and source-specific emissions are highly right-skewed. Standardization (already used in the notebook) is essential; log features may improve linear models further.
+2. **Strong multicollinearity:** Emission family variables are strongly correlated, which can destabilize OLS coefficients. This justifies Ridge/Lasso/Elastic Net and dimensionality reduction with PCA.
+3. **Concentration and temporal dynamics:** A small set of countries dominates total emissions, while distribution across countries remains broad over time. Model validation should remain time-aware.
+4. **Energy-economic links are nonlinear:** Relationships such as GDP-per-capita vs CO2-per-capita are curved, supporting nonlinear models (NN/LSTM) in addition to linear baselines.
+5. **Composition shifts matter:** Coal, gas, and oil shares evolve over time, indicating structural changes that sequence-aware models can exploit.
+
+---
+
+### Reproducibility note
+
+All EDA outputs are saved into:
+
+- `output/figures/eda_*.png`
+- `output/tables/eda_*.csv`
+
+Knit this report from the repository root so paths resolve correctly.

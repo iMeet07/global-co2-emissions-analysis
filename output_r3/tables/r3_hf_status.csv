@@ -1,0 +1,3 @@
+Model,Status,Checkpoint
+PatchTST,Success on cuda (fallback used for 89 countries),ibm/patchtst-etth1-pretrain
+TimesFM,Success on gpu,google/timesfm-1.0-200m-pytorch
