@@ -7,7 +7,16 @@ author: "Group-9"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.path = "figures/",
+  dev = "png",
+  dpi = 300
+)
+
+if (!dir.exists("figures")) dir.create("figures")
 ```
 
 #  Introduction
