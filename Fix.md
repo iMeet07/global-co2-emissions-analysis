@@ -169,29 +169,3 @@ Compare:
 
 ---
 
-# 🔥 Final Notes
-
-## To Get A / A+
-
-You MUST:
-- Clearly justify each method
-- Use correct data split (time-aware)
-- Provide strong interpretation (not just results)
-- Show awareness of limitations
-
-## Extra Points
-- Ensemble model
-- Hugging Face model
-- Clean visualizations
-- Strong discussion section
-
----
-
-# 🚀 Final Outcome
-
-Following this plan ensures:
-- Strong methodology
-- Clear research alignment
-- High-quality analysis
-
-👉 Target: **A / A+ grade**
