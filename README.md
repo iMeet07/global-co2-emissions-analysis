@@ -168,9 +168,19 @@ DBSCAN uniquely identifies anomalous country-year outliers that resist clean cla
 
 **Research Question:** *Can future CO₂ emissions be accurately forecast, and do deep learning models outperform classical baselines?*
 
-**Target:** `co2_per_capita` | **Split:** Time-based (train ≤ 2015, val 2016–2019, test 2020+)
+**Target:** `co2_per_capita` | **Split:** Time-based (train ≤ 2015, val 2016–2019, test 2020–2022)
 
-**Feature engineering:** Lag features (`co2_lag1`, `co2_lag3`, `gdp_lag1`, `energy_lag1`), rolling averages, year trend.
+**Feature engineering:** Lag features (`co2_lag1`, `co2_lag3`, `gdp_lag1`, `energy_lag1`), 3- and 5-year rolling means, year trend.
+
+### Models implemented
+
+| Category | Models |
+|----------|--------|
+| **Linear baselines** | Linear Regression, Ridge, Lasso, ElasticNet |
+| **Tree-based** | Random Forest, XGBoost (CUDA if available) |
+| **Neural networks** | MLP (sklearn), LSTM (TensorFlow / GPU) |
+| **Pretrained (HF)** | PatchTST (`ibm/patchtst-etth1-pretrain`), TimesFM (`google/timesfm-1.0-200m-pytorch`) — per-country, zero-shot |
+| **Ensembles** | Simple Average (top-2 by RMSE), Weighted (val-RMSE optimized weights via L-BFGS-B), **Stacking (Ridge meta-learner, 5-fold OOF)** |
 
 ### Model Comparison (Test RMSE)
 
@@ -178,40 +188,47 @@ DBSCAN uniquely identifies anomalous country-year outliers that resist clean cla
 
 ### Test Set Results
 
-| Model | Test RMSE | Test MAE | Test R² |
-|-------|-----------|----------|---------|
-| **Lasso** | **0.376** | **0.207** | **0.9957** |
-| Ensemble (Lasso+Linear) | 0.384 | 0.210 | 0.9956 |
-| Linear | 0.406 | 0.224 | 0.9950 |
-| Ridge | 0.408 | 0.213 | 0.9950 |
-| XGBoost | 0.502 | 0.283 | 0.9924 |
-| Random Forest | 0.553 | 0.299 | 0.9907 |
-| MLP | 0.584 | 0.347 | 0.9897 |
-| PatchTST | 0.901 | 0.529 | 0.9754 |
-| TimesFM | 0.947 | 0.541 | 0.9728 |
-| LSTM | 0.960 | 0.545 | 0.9723 |
+| Model | Test RMSE | Test MAE | Test R² | Test MAPE |
+|-------|-----------|----------|---------|-----------|
+| 🏆 **Ensemble_Stacking** | **0.357** | **0.208** | **0.9961** | **4.95%** |
+| Lasso | 0.376 | 0.207 | 0.9957 | 4.85% |
+| Ensemble_Avg (Lasso+ElasticNet) | 0.386 | 0.209 | 0.9955 | 5.08% |
+| Ensemble_Weighted | 0.396 | 0.216 | 0.9952 | 4.75% |
+| ElasticNet | 0.400 | 0.213 | 0.9951 | 5.37% |
+| Linear | 0.406 | 0.224 | 0.9950 | 5.19% |
+| Ridge | 0.408 | 0.213 | 0.9950 | 5.27% |
+| XGBoost | 0.502 | 0.283 | 0.9924 | 5.37% |
+| Random Forest | 0.553 | 0.299 | 0.9907 | 5.35% |
+| MLP | 0.584 | 0.347 | 0.9897 | 8.87% |
+| PatchTST | 0.901 | 0.529 | 0.9754 | 10.16% |
+| TimesFM | 0.947 | 0.541 | 0.9728 | 9.93% |
+| LSTM | 1.181 | 0.658 | 0.9581 | 13.45% |
 
-### Best Model — Predicted vs Actual
+### Best Model — Stacking Ensemble (Predicted vs Actual)
 
-![R3 Actual vs Predicted](output_r3/figures/r3_actual_vs_predicted.png)
-
-### Linear Regression
-
-![Linear Predictions](output_r3/figures/r3_linear_test_pred_vs_actual.png)
+![Stacking Ensemble Predictions](output_r3/figures/r3_ensemble_stacking_test_pred_vs_actual.png)
 
 ### Lasso Regression
 
 ![Lasso Predictions](output_r3/figures/r3_lasso_test_pred_vs_actual.png)
 
+### ElasticNet Regression
+
+![ElasticNet Predictions](output_r3/figures/r3_elasticnet_test_pred_vs_actual.png)
+
 ### Ridge Regression
 
 ![Ridge Predictions](output_r3/figures/r3_ridge_test_pred_vs_actual.png)
+
+### Linear Regression
+
+![Linear Predictions](output_r3/figures/r3_linear_test_pred_vs_actual.png)
 
 ### Random Forest
 
 ![Random Forest Predictions](output_r3/figures/r3_randomforest_test_pred_vs_actual.png)
 
-### XGBoost
+### XGBoost (CUDA)
 
 ![XGBoost Predictions](output_r3/figures/r3_xgboost_test_pred_vs_actual.png)
 
@@ -233,23 +250,29 @@ DBSCAN uniquely identifies anomalous country-year outliers that resist clean cla
 
 ![PatchTST Yearly Forecast](output_r3/figures/r3_patchtst_yearly_forecast.png)
 
-### TimesFM (Hugging Face) — Predictions & Yearly Forecast
+### TimesFM (Google / Hugging Face) — Predictions & Yearly Forecast
 
 ![TimesFM Predictions](output_r3/figures/r3_timesfm_test_pred_vs_actual.png)
 
 ![TimesFM Yearly Forecast](output_r3/figures/r3_timesfm_yearly_forecast.png)
 
-### Ensemble (Lasso + Linear)
+### Ensemble Comparison
 
-![Ensemble Predictions](output_r3/figures/r3_ensemble_avg_lasso_linear__test_pred_vs_actual.png)
+| Ensemble type | Strategy | Test RMSE |
+|---------------|----------|-----------|
+| Simple Average | Average of top-2 models by RMSE | 0.386 |
+| Weighted | L-BFGS-B optimized weights on val RMSE | 0.396 |
+| **Stacking** | Ridge meta-learner on 5-fold OOF predictions | **0.357** |
 
-### Key Finding
+![Stacking Predictions](output_r3/figures/r3_ensemble_stacking_test_pred_vs_actual.png)
 
-Lasso achieves the best test R² (0.9957) and lowest RMSE (0.376), outperforming all tree-based,
-neural, and pretrained models on this dataset. The ensemble (Lasso + Linear) matches closely.
-Pretrained Hugging Face models (PatchTST, TimesFM) deliver competitive zero-shot performance
-(R² ≈ 0.975) without any task-specific training, demonstrating strong generalization from
-large-scale pretraining.
+### Key Findings
+
+- **Stacking ensemble achieves the best test RMSE (0.357, R² = 0.9961)**, outperforming all individual models and simpler ensembles. The Ridge meta-learner (tuned via 3-fold CV) learns to weight linear regularized models most heavily, and appropriately down-weights tree-based models on this dataset.
+- **Lasso is the best single model** (RMSE = 0.376, R² = 0.9957), confirming that strong L1 regularization fits the co2 per capita regression well given collinear economic/energy predictors.
+- **ElasticNet** (L1+L2 combined, RMSE = 0.400) provides a robust alternative with better generalization than Ridge when predictors are moderately correlated.
+- **Pretrained HF models** (PatchTST, TimesFM) deliver competitive zero-shot performance (R² ≈ 0.973–0.975) per country without any task-specific fine-tuning, demonstrating the value of large-scale time-series pretraining.
+- **Deep learning** (LSTM, MLP) underperforms linear methods on this relatively small panel dataset, where regularized regression captures the dominant linear signal more efficiently.
 
 ---
 
