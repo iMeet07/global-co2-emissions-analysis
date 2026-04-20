@@ -1,0 +1,400 @@
+---
+title: "R4 Analysis: Economic Development, Energy Intensity, and CO2 Emissions"
+author: "Group 9"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    number_sections: true
+    toc: true
+fontsize: 11pt
+geometry: margin=1in
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  # Use explicit R4 prefix so output filenames are consistent with r1-/r2- style.
+  fig.path = "figures/r4-",
+  dev = "png",
+  dpi = 300,
+  fig.width = 7,
+  fig.height = 5
+)
+
+if (!dir.exists("figures")) dir.create("figures")
+```
+
+# Research Question 4
+
+## Research Question
+
+Do countries become more energy-efficient as they develop, and how does this affect CO2 emissions over time?
+
+## Motivation
+
+This analysis extends the project beyond prediction and clustering by examining a deeper development question. Instead of only asking whether variables are associated with emissions, this section studies whether economic development is linked to lower energy intensity and whether this, in turn, changes CO2 emissions per capita.
+
+The analysis addresses three specific ideas:
+
+1. As GDP increases, do countries tend to use less energy per unit of output?
+2. Is higher energy intensity associated with higher CO2 emissions per capita?
+3. Does the effect of GDP on CO2 emissions depend on energy intensity?
+
+These questions matter because they help distinguish whether emissions are driven more by economic scale or by the way energy is used.
+
+# Data and Variables
+
+```{r load-data}
+library(tidyverse)
+library(car)
+library(broom)
+library(scales)
+library(plm)
+library(knitr)
+
+df <- read.csv("cleaned_co2_data_20vars.csv")
+
+str(df)
+summary(df)
+```
+
+We use the following variables:
+
+- `gdp`: level of economic development
+- `energy_per_gdp`: energy intensity, interpreted as energy used per unit of GDP
+- `co2_per_capita`: environmental outcome
+- `population`: demographic control
+- `energy_per_capita`: direct energy use control
+- `country` and `year`: panel identifiers
+
+A lower value of `energy_per_gdp` indicates better energy efficiency, because less energy is required to generate one unit of economic output.
+
+```{r select-vars}
+df_r4 <- df %>%
+  select(country, year, gdp, energy_per_gdp, co2_per_capita, population, energy_per_capita) %>%
+  filter(
+    !is.na(country),
+    !is.na(year),
+    !is.na(gdp),
+    !is.na(energy_per_gdp),
+    !is.na(co2_per_capita),
+    !is.na(population),
+    !is.na(energy_per_capita)
+  )
+
+glimpse(df_r4)
+summary(df_r4)
+```
+
+# Exploratory Data Analysis
+
+## GDP vs Energy per GDP
+
+If countries become more efficient as they develop, energy intensity should decline as GDP increases.
+
+```{r plot-gdp-energy}
+ggplot(df_r4, aes(x = gdp, y = energy_per_gdp)) +
+  geom_point(alpha = 0.35, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_x_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(
+    title = "GDP vs Energy per GDP",
+    subtitle = "A negative trend suggests higher development is associated with lower energy intensity",
+    x = "GDP",
+    y = "Energy per GDP"
+  ) +
+  theme_minimal()
+```
+
+## Energy per GDP vs CO2 per Capita
+
+This plot examines whether more energy-intensive economies tend to emit more CO2 per capita.
+
+```{r plot-energy-co2}
+ggplot(df_r4, aes(x = energy_per_gdp, y = co2_per_capita)) +
+  geom_point(alpha = 0.35, color = "darkgreen") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    title = "Energy per GDP vs CO2 per Capita",
+    subtitle = "Higher energy intensity is associated with higher emissions",
+    x = "Energy per GDP",
+    y = "CO2 per Capita"
+  ) +
+  theme_minimal()
+```
+
+## GDP vs CO2 per Capita Colored by Energy Intensity
+
+This plot helps show whether countries with similar GDP levels have different CO2 outcomes depending on energy intensity.
+
+```{r plot-gdp-co2-color}
+ggplot(df_r4, aes(x = gdp, y = co2_per_capita, color = energy_per_gdp)) +
+  geom_point(alpha = 0.5) +
+  scale_x_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(
+    title = "GDP vs CO2 per Capita Colored by Energy per GDP",
+    subtitle = "Color indicates differences in energy intensity",
+    x = "GDP",
+    y = "CO2 per Capita",
+    color = "Energy per GDP"
+  ) +
+  theme_minimal()
+```
+
+# Aggregate Trends Over Time
+
+We summarize yearly averages to study long-run patterns.
+
+```{r yearly-summary}
+df_year <- df_r4 %>%
+  group_by(year) %>%
+  summarise(
+    avg_gdp = mean(gdp, na.rm = TRUE),
+    avg_energy_per_gdp = mean(energy_per_gdp, na.rm = TRUE),
+    avg_co2_per_capita = mean(co2_per_capita, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+kable(head(df_year), digits = 3)
+```
+
+## Average GDP Over Time
+
+```{r plot-year-gdp}
+ggplot(df_year, aes(x = year, y = avg_gdp)) +
+  geom_line(linewidth = 1) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(
+    title = "Average GDP Over Time",
+    x = "Year",
+    y = "Average GDP"
+  ) +
+  theme_minimal()
+```
+
+## Average Energy per GDP Over Time
+
+```{r plot-year-energy}
+ggplot(df_year, aes(x = year, y = avg_energy_per_gdp)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Average Energy per GDP Over Time",
+    subtitle = "A downward trend indicates improving energy efficiency",
+    x = "Year",
+    y = "Average Energy per GDP"
+  ) +
+  theme_minimal()
+```
+
+## Average CO2 per Capita Over Time
+
+```{r plot-year-co2}
+ggplot(df_year, aes(x = year, y = avg_co2_per_capita)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Average CO2 per Capita Over Time",
+    x = "Year",
+    y = "Average CO2 per Capita"
+  ) +
+  theme_minimal()
+```
+
+# Model 1: GDP and Energy Intensity
+
+This model examines whether GDP and energy intensity are associated with CO2 emissions per capita.
+
+$$
+CO2\_per\_capita = \beta_0 + \beta_1 GDP + \beta_2 Energy\_per\_GDP + \varepsilon
+$$
+
+```{r model1}
+model1 <- lm(co2_per_capita ~ gdp + energy_per_gdp, data = df_r4)
+
+summary(model1)
+tidy(model1)
+```
+
+# Model 2: Add Controls
+
+This model adds population and energy use per capita as controls.
+
+$$
+CO2\_per\_capita = \beta_0 + \beta_1 GDP + \beta_2 Energy\_per\_GDP + \beta_3 Population + \beta_4 Energy\_per\_capita + \varepsilon
+$$
+
+```{r model2}
+model2 <- lm(co2_per_capita ~ gdp + energy_per_gdp + population + energy_per_capita, data = df_r4)
+
+summary(model2)
+tidy(model2)
+```
+
+# Model 3: Interaction Between GDP and Energy Intensity
+
+This model tests whether the effect of GDP on CO2 emissions depends on energy intensity.
+
+$$
+CO2\_per\_capita = \beta_0 + \beta_1 GDP + \beta_2 Energy\_per\_GDP + \beta_3 (GDP \times Energy\_per\_GDP) + \varepsilon
+$$
+
+```{r model3}
+model3 <- lm(co2_per_capita ~ gdp * energy_per_gdp, data = df_r4)
+
+summary(model3)
+tidy(model3)
+```
+
+## Interaction Visualization
+
+```{r interaction-groups}
+df_r4_grouped <- df_r4 %>%
+  mutate(
+    intensity_group = ntile(energy_per_gdp, 3),
+    intensity_group = factor(
+      intensity_group,
+      levels = c(1, 2, 3),
+      labels = c("Low Energy per GDP", "Medium Energy per GDP", "High Energy per GDP")
+    )
+  )
+
+table(df_r4_grouped$intensity_group)
+```
+
+```{r interaction-plot}
+ggplot(df_r4_grouped, aes(x = gdp, y = co2_per_capita, color = intensity_group)) +
+  geom_point(alpha = 0.35) +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_x_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(
+    title = "GDP and CO2 per Capita by Energy Intensity Group",
+    subtitle = "Used to visualize whether the GDP-emissions slope differs by energy intensity",
+    x = "GDP",
+    y = "CO2 per Capita",
+    color = "Group"
+  ) +
+  theme_minimal()
+```
+
+# Model 4: Fixed Effects Panel Model
+
+A fixed effects model compares each country to itself over time. This is stronger than pooled OLS because it controls for time-invariant country characteristics such as geography, industrial structure, and long-run institutional differences.
+
+```{r panel-model}
+pdata <- pdata.frame(df_r4, index = c("country", "year"))
+
+panel_model <- plm(
+  co2_per_capita ~ log(gdp) + energy_per_gdp,
+  data = pdata,
+  model = "within",
+  effect = "individual"
+)
+
+summary(panel_model)
+```
+
+# Model 5: Environmental Kuznets Curve
+
+This model tests whether the GDP-emissions relationship is nonlinear by including a squared GDP term.
+
+$$
+CO2\_per\_capita = \beta_0 + \beta_1 GDP + \beta_2 GDP^2 + \beta_3 Energy\_per\_GDP + \varepsilon
+$$
+
+```{r ekc-model}
+model_ekc <- lm(co2_per_capita ~ gdp + I(gdp^2) + energy_per_gdp, data = df_r4)
+
+summary(model_ekc)
+tidy(model_ekc)
+```
+
+# Diagnostics
+
+## Multicollinearity
+
+```{r vif-check}
+vif(model2)
+```
+
+VIF values below 5 suggest that multicollinearity is not a major concern in this model.
+
+## Residual Diagnostics
+
+```{r diagnostics}
+par(mfrow = c(2, 2))
+plot(model2)
+par(mfrow = c(1, 1))
+```
+
+The diagnostic plots should be interpreted as follows:
+
+- Residuals vs Fitted: checks linearity and mean-zero residuals
+- Normal Q-Q: checks whether residuals are approximately normal
+- Scale-Location: checks whether variance is approximately constant
+- Residuals vs Leverage: identifies influential observations
+
+# Model Comparison
+
+We compare the main OLS-style models using adjusted R-squared and AIC.
+
+```{r compare-models}
+comparison <- tibble(
+  Model = c(
+    "Model 1: GDP + Energy per GDP",
+    "Model 2: Add Controls",
+    "Model 3: Interaction",
+    "Model 5: EKC"
+  ),
+  Adjusted_R2 = c(
+    summary(model1)$adj.r.squared,
+    summary(model2)$adj.r.squared,
+    summary(model3)$adj.r.squared,
+    summary(model_ekc)$adj.r.squared
+  ),
+  AIC = c(
+    AIC(model1),
+    AIC(model2),
+    AIC(model3),
+    AIC(model_ekc)
+  )
+)
+
+kable(comparison, digits = 3)
+```
+
+# Results and Interpretation
+
+The results show that GDP is positively associated with CO2 emissions per capita, but its explanatory power is limited when used only with energy intensity. Model 1 explains only a modest share of the overall variation in emissions.
+
+After adding controls in Model 2, the fit improves substantially. This indicates that direct energy use per capita is a major determinant of CO2 emissions. In the full model, energy-related variables are much more informative than population, and population is not statistically significant once the other variables are included.
+
+Energy intensity remains statistically significant across the main specifications. This means that economies using more energy per unit of output tend to have higher CO2 emissions per capita, even after accounting for GDP.
+
+The interaction model does not provide evidence that the effect of GDP changes meaningfully with energy intensity. The interaction term is not statistically significant, so the data do not support the claim that energy intensity strongly moderates the GDP-emissions relationship in this specification.
+
+The EKC model provides evidence of a nonlinear relationship between GDP and CO2 emissions. The positive coefficient on GDP and the negative coefficient on the squared GDP term are consistent with an inverted-U pattern, which suggests that emissions may rise in earlier stages of development and level off or decline at higher development levels.
+
+The fixed effects model confirms that the positive association of log(GDP) and energy intensity with CO2 emissions also holds within countries over time
+
+# Conclusion
+
+This analysis finds that economic development, energy intensity, and energy use are all related to CO2 emissions, but their roles are not equally important. GDP is positively associated with emissions, yet the strongest predictor in the expanded model is energy use per capita. This suggests that emissions are driven more by how much energy countries consume than by economic size alone.
+
+Energy intensity is also an important predictor. Countries that require more energy to generate output tend to have higher CO2 emissions per capita. This supports the idea that improving efficiency and reducing energy intensity can contribute to lower emissions.
+
+At the same time, the interaction model shows that the effect of GDP on emissions does not significantly change across different levels of energy intensity in this specification. Therefore, the data do not support a strong moderation effect here.
+
+The Environmental Kuznets Curve model provides evidence of a nonlinear GDP-emissions relationship. The pattern is consistent with emissions rising during earlier stages of development and weakening at higher levels of development.
+
+Overall, the main implication of this section is that policies targeting energy use and energy efficiency are likely to be more effective for reducing emissions than policies focused only on slowing economic growth.
+
+# Limitations
+
+This analysis uses observational data, so the results should be interpreted as associations rather than causal effects.
+
+The pooled OLS models may still be influenced by omitted variables, although the fixed effects model reduces this problem by controlling for unobserved country-level characteristics that are constant over time.
+
+The relationship between GDP and emissions may be more complex than the linear and quadratic forms estimated here, and future work could evaluate more flexible nonlinear methods.
+
+Finally, the dataset is unbalanced across countries and years, and measurement differences across countries may also affect the estimates.
