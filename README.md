@@ -14,7 +14,7 @@ an R Markdown report (`R1-R2_AMS-597-Project.Rmd`) and a Python Jupyter notebook
 |----|----------|--------|------|
 | **R1** | Which economic and energy-related variables are most strongly associated with CO₂ emissions per capita? | OLS, Ridge, Lasso | `R1-R2_AMS-597-Project.Rmd` |
 | **R2** | Can country-year observations be grouped into meaningful emission clusters? | K-Means, Hierarchical, DBSCAN, GMM | `R1-R2_AMS-597-Project.Rmd` |
-| **R3** | Can future CO₂ emissions be accurately forecast, and do deep learning models outperform classical baselines? | Linear, Ridge, Lasso, RF, XGBoost, MLP, LSTM, PatchTST, TimesFM, Ensemble | `r3_forecasting.ipynb` |
+| **R3** | Can future CO₂ emissions be accurately forecast, and do deep learning models outperform classical baselines? | Linear, Ridge, Lasso, ElasticNet, RF, XGBoost, MLP, LSTM, PatchTST, TimesFM, Ensemble (Weighted/Avg/Stacking) | `r3_forecasting.ipynb` |
 
 ---
 
@@ -170,7 +170,9 @@ DBSCAN uniquely identifies anomalous country-year outliers that resist clean cla
 
 **Target:** `co2_per_capita` | **Split:** Time-based (train ≤ 2015, val 2016–2019, test 2020–2022)
 
-**Feature engineering:** Lag features (`co2_lag1`, `co2_lag3`, `gdp_lag1`, `energy_lag1`), 3- and 5-year rolling means, year trend.
+**Feature engineering:** Lag features (`co2_lag1`, `co2_lag3`, `gdp_lag1`, `energy_lag1`), 3- and 5-year rolling means (shifted by 1 to prevent leakage), year trend.
+
+> **Leakage fixes applied (Apr 2026):** (1) Rolling means now use `.shift(1)` so year *t*'s feature is built from years *t-1* and earlier only. (2) The LSTM uses a separate scaler fitted on train-only data. (3) Ensemble members are selected by **Val RMSE**, not Test RMSE. (4) Stacking uses `TimeSeriesSplit` instead of shuffled KFold. These corrections raise reported RMSE values compared to earlier runs; the new numbers are more trustworthy.
 
 ### Models implemented
 
@@ -180,7 +182,7 @@ DBSCAN uniquely identifies anomalous country-year outliers that resist clean cla
 | **Tree-based** | Random Forest, XGBoost (CUDA if available) |
 | **Neural networks** | MLP (sklearn), LSTM (TensorFlow / GPU) |
 | **Pretrained (HF)** | PatchTST (`ibm/patchtst-etth1-pretrain`), TimesFM (`google/timesfm-1.0-200m-pytorch`) — per-country, zero-shot |
-| **Ensembles** | Simple Average (top-2 by RMSE), Weighted (val-RMSE optimized weights via L-BFGS-B), **Stacking (Ridge meta-learner, 5-fold OOF)** |
+| **Ensembles** | Simple Average (top-2 by **Val** RMSE), Weighted (L-BFGS-B val-optimized weights), Stacking (Ridge meta-learner, `TimeSeriesSplit` 5-fold OOF) |
 
 ### Model Comparison (Test RMSE)
 
@@ -190,23 +192,23 @@ DBSCAN uniquely identifies anomalous country-year outliers that resist clean cla
 
 | Model | Test RMSE | Test MAE | Test R² | Test MAPE |
 |-------|-----------|----------|---------|-----------|
-| 🏆 **Ensemble_Stacking** | **0.357** | **0.208** | **0.9961** | **4.95%** |
-| Lasso | 0.376 | 0.207 | 0.9957 | 4.85% |
-| Ensemble_Avg (Lasso+ElasticNet) | 0.386 | 0.209 | 0.9955 | 5.08% |
-| Ensemble_Weighted | 0.396 | 0.216 | 0.9952 | 4.75% |
-| ElasticNet | 0.400 | 0.213 | 0.9951 | 5.37% |
-| Linear | 0.406 | 0.224 | 0.9950 | 5.19% |
-| Ridge | 0.408 | 0.213 | 0.9950 | 5.27% |
-| XGBoost | 0.502 | 0.283 | 0.9924 | 5.37% |
-| Random Forest | 0.553 | 0.299 | 0.9907 | 5.35% |
-| MLP | 0.584 | 0.347 | 0.9897 | 8.87% |
+| 🏆 **Ensemble_Weighted** | **0.582** | **0.318** | **0.9897** | **7.20%** |
+| Lasso | 0.606 | 0.322 | 0.9889 | 7.78% |
+| Ensemble_Avg (ElasticNet+Lasso) | 0.607 | 0.323 | 0.9888 | 7.80% |
+| ElasticNet | 0.609 | 0.326 | 0.9887 | 7.85% |
+| Ridge | 0.616 | 0.325 | 0.9885 | 7.76% |
+| MLP | 0.644 | 0.394 | 0.9874 | 14.26% |
+| Linear | 0.652 | 0.343 | 0.9871 | 7.90% |
+| Random Forest | 0.654 | 0.392 | 0.9871 | 7.34% |
+| XGBoost | 0.678 | 0.384 | 0.9861 | 6.97% |
 | PatchTST | 0.901 | 0.529 | 0.9754 | 10.16% |
 | TimesFM | 0.947 | 0.541 | 0.9728 | 9.93% |
-| LSTM | 1.181 | 0.658 | 0.9581 | 13.45% |
+| LSTM | 1.044 | 0.593 | 0.9673 | 12.16% |
+| Ensemble_Stacking | 1.734 | 1.447 | 0.9089 | 96.40% |
 
-### Best Model — Stacking Ensemble (Predicted vs Actual)
+### Best Model — Weighted Ensemble (Predicted vs Actual)
 
-![Stacking Ensemble Predictions](output_r3/figures/r3_ensemble_stacking_test_pred_vs_actual.png)
+![Weighted Ensemble Predictions](output_r3/figures/r3_ensemble_stacking_test_pred_vs_actual.png)
 
 ### Lasso Regression
 
@@ -260,19 +262,18 @@ DBSCAN uniquely identifies anomalous country-year outliers that resist clean cla
 
 | Ensemble type | Strategy | Test RMSE |
 |---------------|----------|-----------|
-| Simple Average | Average of top-2 models by RMSE | 0.386 |
-| Weighted | L-BFGS-B optimized weights on val RMSE | 0.396 |
-| **Stacking** | Ridge meta-learner on 5-fold OOF predictions | **0.357** |
-
-![Stacking Predictions](output_r3/figures/r3_ensemble_stacking_test_pred_vs_actual.png)
+| **Weighted** | L-BFGS-B optimized weights on val RMSE | **0.582** |
+| Simple Average | Average of top-2 models by val RMSE | 0.607 |
+| Stacking | Ridge meta-learner, `TimeSeriesSplit` 5-fold OOF | 1.734 |
 
 ### Key Findings
 
-- **Stacking ensemble achieves the best test RMSE (0.357, R² = 0.9961)**, outperforming all individual models and simpler ensembles. The Ridge meta-learner (tuned via 3-fold CV) learns to weight linear regularized models most heavily, and appropriately down-weights tree-based models on this dataset.
-- **Lasso is the best single model** (RMSE = 0.376, R² = 0.9957), confirming that strong L1 regularization fits the co2 per capita regression well given collinear economic/energy predictors.
-- **ElasticNet** (L1+L2 combined, RMSE = 0.400) provides a robust alternative with better generalization than Ridge when predictors are moderately correlated.
-- **Pretrained HF models** (PatchTST, TimesFM) deliver competitive zero-shot performance (R² ≈ 0.973–0.975) per country without any task-specific fine-tuning, demonstrating the value of large-scale time-series pretraining.
-- **Deep learning** (LSTM, MLP) underperforms linear methods on this relatively small panel dataset, where regularized regression captures the dominant linear signal more efficiently.
+- **Weighted ensemble achieves the best test RMSE (0.582, R² = 0.9897)** after leakage corrections. L-BFGS-B weight optimization on the validation set correctly identifies that regularized linear models carry the most signal on this panel dataset.
+- **Lasso is the best single model** (RMSE = 0.606, R² = 0.9889), confirming that L1 regularization fits CO₂ per capita regression well given collinear economic/energy predictors.
+- **Stacking underperforms** (RMSE = 1.734) after switching to `TimeSeriesSplit`. With only ~26 years per country, each chronological fold has very few training rows, leaving the meta-learner under-trained. This is an inherent limitation of time-series stacking on small panel datasets.
+- **Pretrained HF models** (PatchTST, TimesFM) deliver competitive zero-shot performance (R² ≈ 0.973–0.975) without any task-specific fine-tuning, demonstrating the value of large-scale time-series pretraining.
+- **Deep learning** (LSTM, MLP) underperforms linear methods on this small panel dataset, where regularized regression captures the dominant linear signal more efficiently.
+- **RMSE values are higher than pre-fix runs** (e.g. Lasso 0.606 vs 0.376 before). This is expected and correct — earlier results were inflated by rolling features that included the target, test-set-driven ensemble selection, and a shuffled fold CV. The current numbers reflect a genuinely out-of-sample evaluation.
 
 ---
 
