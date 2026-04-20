@@ -95,7 +95,9 @@ with CO₂ emissions per capita?*
 
 This section fits three regression models — Ordinary Least Squares (OLS), Ridge, and Lasso —
 to estimate the relationship between per-capita CO₂ emissions and three candidate predictors:
-GDP, population, and energy consumption per capita. An 80/20 train-test split is used to evaluate
+GDP, population, and energy consumption per capita. A random 80/20 split is used as a baseline;
+however, this may not fully account for temporal dependencies in panel data. 
+A time-aware split would provide a more robust evaluation of predictive performance. to evaluate
 out-of-sample performance. Ridge and Lasso regularization are included to assess whether penalization
 improves generalization and to enable implicit variable selection (Lasso). Variance Inflation Factors
 (VIF) and residual diagnostics are reported to validate OLS assumptions.
