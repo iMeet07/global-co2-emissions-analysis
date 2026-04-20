@@ -8,12 +8,14 @@ author: "Group-9"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo = TRUE,
+  echo    = TRUE,
   warning = FALSE,
   message = FALSE,
-  fig.path = "figures/",
-  dev = "png",
-  dpi = 300
+  fig.path   = "figures/",
+  dev        = "png",
+  dpi        = 150,
+  fig.width  = 8,
+  fig.height = 5
 )
 
 if (!dir.exists("figures")) dir.create("figures")
@@ -71,15 +73,15 @@ the hypothesis that wealthier economies tend to produce higher per-capita emissi
 substantial heterogeneity is evident, suggesting that additional variables (energy mix, industrial
 composition) moderate this relationship.
 
-```{r eda}
+```{r eda, fig.width=8, fig.height=5}
 ggplot(df, aes(x = gdp, y = co2_per_capita)) +
   geom_point(alpha = 0.4, color = "darkgreen") +
   geom_smooth(method = "lm", color = "red") +
   labs(
-    title = "GDP vs. CO₂ Emissions per Capita",
+    title = expression("GDP vs. CO"[2]*" Emissions per Capita"),
     subtitle = "Positive association observed; substantial cross-country heterogeneity remains",
     x = "GDP (current USD)",
-    y = "CO₂ Emissions per Capita (tonnes)"
+    y = expression("CO"[2]*" Emissions per Capita (tonnes)")
   ) +
   theme_minimal()
 ```
@@ -120,10 +122,12 @@ cat("Test samples:", nrow(test_data), "\n")
 
 ## Correlation Analysis
 
-```{r r1-correlation}
+```{r r1-correlation, fig.width=6, fig.height=6}
 cor_matrix <- cor(df_model)
-corrplot(cor_matrix, method = "color", tl.cex = 0.8,
-         title = "Correlation Matrix of R1 Variables", mar = c(0,0,1,0))
+# mar = c(bottom, left, top, right): top=3 leaves room for the title;
+# sides=1 leave room for the variable-name labels on each edge.
+corrplot(cor_matrix, method = "color", tl.cex = 0.9,
+         title = "Correlation Matrix of R1 Variables", mar = c(1, 1, 3, 1))
 ```
 
 ---
@@ -205,7 +209,7 @@ cat("Best Model (lowest RMSE):", results$Model[which.min(results$RMSE)], "\n")
 
 ### Bar Chart: Model Performance
 
-```{r r1-comparison-barchart}
+```{r r1-comparison-barchart, fig.width=9, fig.height=5}
 results_long <- results %>%
   pivot_longer(cols = c(RMSE, R2, MAE), names_to = "Metric", values_to = "Value")
 
@@ -224,7 +228,7 @@ ggplot(results_long, aes(x = Model, y = Value, fill = Model)) +
 
 ### Actual vs Predicted — All Three Models
 
-```{r r1-actual-vs-predicted}
+```{r r1-actual-vs-predicted, fig.width=8, fig.height=4}
 pred_df <- data.frame(
   actual    = rep(y_test, 3),
   predicted = c(as.numeric(ols_pred), as.numeric(ridge_pred), as.numeric(lasso_pred)),
@@ -237,9 +241,10 @@ ggplot(pred_df, aes(x = actual, y = predicted, color = Model)) +
   facet_wrap(~Model) +
   scale_color_manual(values = c("OLS" = "#4472C4", "Ridge" = "#ED7D31", "Lasso" = "#70AD47")) +
   labs(
-    title = "Actual vs Predicted CO2 per Capita",
+    title = expression("Actual vs Predicted CO"[2]*" per Capita"),
     subtitle = "Dashed line = perfect prediction",
-    x = "Actual CO2", y = "Predicted CO2"
+    x = expression("Actual CO"[2]*" per Capita"),
+    y = expression("Predicted CO"[2]*" per Capita")
   ) +
   theme_minimal() +
   theme(legend.position = "none")
@@ -247,9 +252,10 @@ ggplot(pred_df, aes(x = actual, y = predicted, color = Model)) +
 
 ### OLS Residual Diagnostics
 
-```{r r1-residuals}
-par(mfrow = c(2, 2))
+```{r r1-residuals, fig.width=10, fig.height=8}
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
 plot(ols_model)
+par(mfrow = c(1, 1))
 ```
 
 ---
@@ -318,7 +324,7 @@ cat("Clustering dataset dimensions:", nrow(df_scaled), "x", ncol(df_scaled), "\n
 
 ## STEP 1: PCA — Dimensionality Reduction
 
-```{r r2-pca}
+```{r r2-pca, fig.width=7, fig.height=5}
 pca <- prcomp(df_scaled)
 
 fviz_eig(pca) +
@@ -337,7 +343,7 @@ cat("Variance explained by PC1+PC2:",
 
 ## STEP 2: Optimal K Selection
 
-```{r r2-optimal-k}
+```{r r2-optimal-k, fig.width=7, fig.height=4, fig.show='hold', out.width='50%'}
 fviz_nbclust(df_scaled, kmeans, method = "wss") +
   labs(title = "Elbow Method for Optimal K", x = "Number of Clusters", y = "WSS") +
   theme_minimal()
@@ -351,7 +357,7 @@ fviz_nbclust(df_scaled, kmeans, method = "silhouette") +
 
 ## STEP 3: K-Means Clustering (k = 3)
 
-```{r r2-kmeans}
+```{r r2-kmeans, fig.width=8, fig.height=6}
 set.seed(123)
 kmeans_result <- kmeans(df_scaled, centers = 3, nstart = 25)
 
@@ -391,7 +397,10 @@ ggplot(pca_data, aes(x = PC1, y = PC2, color = km_label)) +
 
 ## STEP 4: Hierarchical Clustering
 
-```{r r2-hierarchical}
+```{r r2-hierarchical, fig.width=9, fig.height=7}
+# Reset par state in case a prior chunk (e.g. residuals) left mfrow != c(1,1).
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1)
+
 set.seed(123)
 
 # Use a subset for dendrogram readability (full dist matrix is expensive)
@@ -448,7 +457,7 @@ ggplot(pca_data, aes(x = PC1, y = PC2, color = hc_label)) +
 
 ## STEP 5: DBSCAN Clustering
 
-```{r r2-dbscan}
+```{r r2-dbscan, fig.width=8, fig.height=5}
 # Determine eps with kNN distance plot (k=5)
 kNN_dist <- kNNdist(df_scaled, k = 5)
 plot(sort(kNN_dist),
@@ -497,7 +506,7 @@ if(sum(db_nonnoise) > 2 && length(unique(dbscan_result$cluster[db_nonnoise])) > 
 
 ## STEP 6: GMM — Gaussian Mixture Model
 
-```{r r2-gmm}
+```{r r2-gmm, fig.width=8, fig.height=6}
 set.seed(123)
 gmm_result <- Mclust(df_scaled, G = 3)
 
@@ -545,7 +554,7 @@ ggplot(pca_data, aes(x = PC1, y = PC2, color = gmm_label, alpha = 1 - gmm_uncert
 
 ## STEP 7: Clustering Methods Comparison
 
-```{r r2-comparison}
+```{r r2-comparison, fig.width=8, fig.height=5}
 # Agreement between K-Means and other methods (Adjusted Rand Index)
 ari_km_hc  <- round(adjustedRandIndex(df_cluster$km_cluster, df_cluster$hc_cluster), 4)
 ari_km_gmm <- round(adjustedRandIndex(df_cluster$km_cluster, df_cluster$gmm_cluster), 4)
