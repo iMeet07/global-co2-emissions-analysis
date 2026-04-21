@@ -1,6 +1,6 @@
 ---
-title: "Untitled"
-author: "Sai Sony Malapati"
+title: "DATA CLEANING"
+author: "AMS 597 GROUP 9"
 date: "2026-03-09"
 output:
   word_document: default
