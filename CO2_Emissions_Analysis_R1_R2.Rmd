@@ -1,0 +1,771 @@
+---
+title: "CO2 Emissions Analysis: Regression and Clustering"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+author: "Group-9"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.path   = "figures/",
+  dev        = "png",
+  dpi        = 150,
+  fig.width  = 8,
+  fig.height = 5
+)
+
+if (!dir.exists("figures")) dir.create("figures")
+```
+
+#  Introduction
+
+Understanding the determinants of global CO₂ emissions is critical for informing evidence-based climate policy. This report applies statistical and machine learning methods to a multi-country, multi-year panel dataset to address two complementary research questions:
+
+**R1 — Regression Analysis:**
+*Which economic and energy-related variables are most strongly associated with CO₂ emissions per capita?*
+
+**R2 — Clustering Analysis:**
+*Can country-year observations be grouped into meaningful clusters based on emission-related characteristics, and do different unsupervised learning methods yield consistent groupings?*
+
+R1 employs regression models (OLS, Ridge, and Lasso) to quantify predictor importance and evaluate out-of-sample predictive performance. R2 applies four clustering algorithms — K-Means, Hierarchical Clustering, DBSCAN, and Gaussian Mixture Models — to identify interpretable emission profiles and assess consistency across methods.
+
+Together, these analyses provide both explanatory and structural insights into global CO₂ emission patterns.
+
+
+---
+
+#  Data Preparation
+
+```{r libraries}
+library(tidyverse)
+library(glmnet)
+library(caret)
+library(factoextra)
+library(cluster)
+library(corrplot)
+library(car)
+library(knitr)
+library(dbscan)
+library(mclust)
+library(gridExtra)
+
+df <- read.csv("cleaned_co2_data_20vars.csv")
+str(df)
+```
+Relevant libraries were loaded for data analysis, modeling, and clustering. The dataset includes 2,640 observations with 20 variables, covering economic indicators and multiple emission measures, providing a strong basis for both regression and clustering analysis.
+
+---
+
+# Exploratory Data Analysis
+
+Prior to modeling, an exploratory analysis was conducted to examine the relationship between GDP and CO₂ emissions per capita. The scatter plot reveals a positive association, indicating that wealthier economies tend to produce higher per-capita emissions.
+
+However, substantial variability across observations suggests that GDP alone does not fully explain emission levels, and that additional factors — such as energy consumption patterns and industrial structure — likely play an important role.
+
+
+```{r eda, fig.width=8, fig.height=5}
+ggplot(df, aes(x = gdp, y = co2_per_capita)) +
+  geom_point(alpha = 0.4, color = "darkgreen") +
+  geom_smooth(method = "lm", color = "red") +
+  labs(
+    title = expression("GDP vs. CO"[2]*" Emissions per Capita"),
+    subtitle = "Positive association observed; substantial cross-country heterogeneity remains",
+    x = "GDP (current USD)",
+    y = expression("CO"[2]*" Emissions per Capita (tonnes)")
+  ) +
+  theme_minimal()
+```
+The plot shows a positive relationship between GDP and CO₂ emissions per capita, as indicated by the upward-sloping regression line. This suggests that higher economic activity is generally associated with higher emissions.
+
+However, the wide spread of points, especially at lower GDP levels, indicates significant variation across countries. This suggests that GDP alone does not fully explain emissions, and other factors also play an important role.
+---
+
+#  Research Question 1: Regression Analysis
+
+**Research Question:** *Which economic and energy-related variables are most strongly associated
+with CO₂ emissions per capita ?*
+
+## Methodology
+
+This section fits three regression models — Ordinary Least Squares (OLS), Ridge, and Lasso — to estimate the relationship between per-capita CO₂ emissions and three predictors: GDP, population, and energy consumption per capita. A random 80/20 train-test split is used to evaluate out-of-sample performance; however, this approach may not fully capture temporal dependencies in panel data, and a time-aware split could provide a more robust assessment.
+
+Ridge and Lasso regularization are included to examine whether penalization improves generalization and to enable implicit variable selection (in the case of Lasso). Variance Inflation Factors (VIF) and residual diagnostics are also reported to validate OLS assumptions.
+
+## Data Preparation
+
+```{r r1-data}
+df_model <- df %>%
+  select(co2_per_capita, gdp, population, energy_per_capita) %>%
+  na.omit()
+
+set.seed(123)
+trainIndex <- createDataPartition(df_model$co2_per_capita, p = 0.8, list = FALSE)
+train_data <- df_model[trainIndex, ]
+test_data  <- df_model[-trainIndex, ]
+
+cat("Training samples:", nrow(train_data), "\n")
+cat("Test samples:", nrow(test_data), "\n")
+```
+The data was cleaned and split into training (80%) and testing (20%) sets, allowing the model to be evaluated on unseen data for reliable performance assessment.
+
+## Correlation Analysis
+
+```{r r1-correlation, fig.width=6, fig.height=6}
+cor_matrix <- cor(df_model)
+# mar = c(bottom, left, top, right): top=3 leaves room for the title;
+# sides=1 leave room for the variable-name labels on each edge.
+corrplot(cor_matrix, method = "color", tl.cex = 0.9,
+         title = "Correlation Matrix of R1 Variables", mar = c(1, 1, 3, 1))
+```
+CO₂ emissions are strongly correlated with energy consumption and moderately with GDP, while population shows little relationship. Low correlations among predictors suggest no major multicollinearity issues.
+
+---
+
+##  Model 1: OLS Regression
+
+```{r r1-ols}
+ols_model <- lm(co2_per_capita ~ gdp + population + energy_per_capita, data = train_data)
+
+ols_pred <- predict(ols_model, newdata = test_data)
+
+ols_rmse <- sqrt(mean((test_data$co2_per_capita - ols_pred)^2))
+ols_r2   <- cor(test_data$co2_per_capita, ols_pred)^2
+ols_mae  <- mean(abs(test_data$co2_per_capita - ols_pred))
+
+summary(ols_model)
+```
+The OLS regression results show that energy consumption per capita has a strong positive and highly significant effect on CO₂ emissions, indicating it is the most important predictor in the model. GDP also has a positive and statistically significant relationship with emissions, although its effect is much smaller.
+
+Population is not statistically significant, suggesting it does not have a meaningful independent impact on CO₂ emissions when other variables are considered.
+
+The model explains approximately 77% of the variation in CO₂ emissions (R² ≈ 0.77), indicating a strong overall fit. The highly significant F-statistic further confirms that the model is statistically meaningful.
+
+
+### Multicollinearity Check (VIF)
+
+```{r r1-vif}
+vif(ols_model)
+```
+All VIF values are low (close to 1), indicating no multicollinearity issues and stable regression estimates.
+---
+
+##  Model 2: Ridge Regression
+
+```{r r1-ridge}
+X_train <- model.matrix(co2_per_capita ~ gdp + population + energy_per_capita, train_data)[,-1]
+y_train <- train_data$co2_per_capita
+
+X_test <- model.matrix(co2_per_capita ~ gdp + population + energy_per_capita, test_data)[,-1]
+y_test <- test_data$co2_per_capita
+
+ridge_model <- cv.glmnet(X_train, y_train, alpha = 0)
+ridge_pred  <- predict(ridge_model, s = "lambda.min", newx = X_test)
+
+ridge_rmse <- sqrt(mean((y_test - ridge_pred)^2))
+ridge_r2   <- cor(y_test, as.numeric(ridge_pred))^2
+ridge_mae  <- mean(abs(y_test - ridge_pred))
+
+cat("Ridge optimal lambda:", ridge_model$lambda.min, "\n")
+cat("Ridge RMSE:", round(ridge_rmse, 4), "| R2:", round(ridge_r2, 4), "| MAE:", round(ridge_mae, 4), "\n")
+```
+Ridge regression was applied with an optimal regularization parameter (λ ≈ 0.638), which helps reduce overfitting by shrinking coefficient values. The model achieves an RMSE of approximately 3.56 and an MAE of 1.85, indicating reasonably accurate predictions.
+
+The R² value of 0.82 suggests that the model explains a high proportion of the variance in CO₂ emissions, slightly improving over the OLS model. This indicates that regularization helps enhance model stability, although the overall improvement is modest.
+
+---
+
+##  Model 3: Lasso Regression
+
+```{r r1-lasso}
+lasso_model <- cv.glmnet(X_train, y_train, alpha = 1)
+lasso_pred  <- predict(lasso_model, s = "lambda.min", newx = X_test)
+
+lasso_rmse <- sqrt(mean((y_test - lasso_pred)^2))
+lasso_r2   <- cor(y_test, as.numeric(lasso_pred))^2
+lasso_mae  <- mean(abs(y_test - lasso_pred))
+
+cat("Lasso optimal lambda:", lasso_model$lambda.min, "\n")
+cat("Lasso coefficients:\n")
+print(coef(lasso_model, s = "lambda.min"))
+```
+Lasso regression was applied with an optimal regularization parameter (λ ≈ 0.0555), which performs both coefficient shrinkage and variable selection. The results show that the population variable is shrunk to zero, indicating it is not an important predictor of CO₂ emissions in this model.
+
+Energy consumption per capita remains the most influential variable, with a strong positive coefficient, while GDP has a very small effect. This highlights that energy usage plays a dominant role in explaining emissions.
+
+Overall, Lasso simplifies the model by retaining only the most relevant predictors, improving interpretability without significantly affecting performance.
+
+---
+
+##  Model Comparison
+
+```{r r1-comparison-table}
+results <- data.frame(
+  Model = c("OLS", "Ridge", "Lasso"),
+  RMSE  = round(c(ols_rmse, ridge_rmse, lasso_rmse), 4),
+  R2    = round(c(ols_r2, ridge_r2, lasso_r2), 4),
+  MAE   = round(c(ols_mae, ridge_mae, lasso_mae), 4)
+)
+
+kable(results, caption = "Model Comparison: RMSE, R², MAE on Test Set")
+cat("Best Model (lowest RMSE):", results$Model[which.min(results$RMSE)], "\n")
+```
+
+The model comparison shows that all three models perform similarly, with very close R² values (around 0.82), indicating strong explanatory power across models.
+
+OLS achieves the lowest RMSE (3.45), making it the most accurate model in terms of prediction error. Lasso performs similarly with slightly higher RMSE, while Ridge has the highest error among the three.
+
+Overall, the results suggest that while regularization methods (Ridge and Lasso) provide comparable performance, the simpler OLS model offers the best predictive accuracy for this dataset.
+
+### Bar Chart: Model Performance
+
+```{r r1-comparison-barchart, fig.width=9, fig.height=5}
+results_long <- results %>%
+  pivot_longer(cols = c(RMSE, R2, MAE), names_to = "Metric", values_to = "Value")
+
+ggplot(results_long, aes(x = Model, y = Value, fill = Model)) +
+  geom_col(width = 0.6) +
+  facet_wrap(~Metric, scales = "free_y") +
+  scale_fill_manual(values = c("OLS" = "#4472C4", "Ridge" = "#ED7D31", "Lasso" = "#70AD47")) +
+  labs(
+    title = "R1 Model Comparison: OLS vs Ridge vs Lasso",
+    subtitle = "Lower RMSE/MAE and higher R² indicate better performance",
+    x = "Model", y = "Value"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+The comparison plot illustrates the performance of OLS, Ridge, and Lasso models using RMSE, MAE, and R² metrics. All three models show very similar R² values, indicating comparable explanatory power.
+
+In terms of prediction error, OLS has the lowest RMSE and MAE, suggesting it provides the most accurate predictions. Lasso performs closely to OLS, while Ridge shows slightly higher error values.
+
+Overall, the plot confirms that while all models perform well, OLS offers the best predictive accuracy, with Ridge and Lasso providing similar but slightly less precise results.
+
+### Actual vs Predicted — All Three Models
+
+```{r r1-actual-vs-predicted, fig.width=8, fig.height=4}
+pred_df <- data.frame(
+  actual    = rep(y_test, 3),
+  predicted = c(as.numeric(ols_pred), as.numeric(ridge_pred), as.numeric(lasso_pred)),
+  Model     = rep(c("OLS", "Ridge", "Lasso"), each = length(y_test))
+)
+
+ggplot(pred_df, aes(x = actual, y = predicted, color = Model)) +
+  geom_point(alpha = 0.4, size = 1.2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  facet_wrap(~Model) +
+  scale_color_manual(values = c("OLS" = "#4472C4", "Ridge" = "#ED7D31", "Lasso" = "#70AD47")) +
+  labs(
+    title = expression("Actual vs Predicted CO"[2]*" per Capita"),
+    subtitle = "Dashed line = perfect prediction",
+    x = expression("Actual CO"[2]*" per Capita"),
+    y = expression("Predicted CO"[2]*" per Capita")
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+The plot compares actual and predicted CO₂ emissions for the OLS, Ridge, and Lasso models. The dashed diagonal line represents perfect predictions, where predicted values exactly match actual values.
+
+Most data points lie close to this line across all three models, indicating good predictive performance. OLS and Lasso show slightly tighter clustering around the line, suggesting more accurate predictions, while Ridge shows slightly greater dispersion.
+
+However, for higher emission values, predictions tend to deviate more from the line, indicating reduced accuracy for extreme cases. Overall, all models perform well, with OLS and Lasso showing slightly better alignment with actual values.
+
+### OLS Residual Diagnostics
+
+```{r r1-residuals, fig.width=10, fig.height=8}
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+plot(ols_model)
+par(mfrow = c(1, 1))
+```
+
+The diagnostic plots assess whether the assumptions of linear regression are satisfied. The Residuals vs Fitted plot shows some pattern and increasing spread, indicating potential heteroscedasticity and slight model misspecification.
+
+The Q-Q plot deviates from the straight line at the tails, suggesting that residuals are not perfectly normally distributed. The Scale-Location plot further confirms increasing variance of residuals with fitted values, supporting the presence of heteroscedasticity.
+
+The Residuals vs Leverage plot indicates that most observations have low leverage, with only a few potential influential points. Overall, while the model performs well, some assumptions such as constant variance and normality are mildly violated.
+
+---
+
+##  Discussion (R1)
+
+All three regression models yield consistent findings, providing strong evidence for the robustness of the identified relationships. `energy_per_capita` emerges as the dominant predictor of CO₂ emissions per capita: it carries the largest and most statistically significant coefficient in the OLS model and is the last predictor retained as Lasso’s regularization strength increases. `gdp` contributes a secondary positive effect, while `population` is largely non-significant after controlling for energy consumption — suggesting that it is the *intensity* of energy use, rather than population size itself, that drives emissions.
+
+Lasso’s implicit variable selection reinforces this interpretation by effectively shrinking weaker predictors toward zero, leaving a parsimonious model dominated by energy-related features. Ridge regression provides a complementary perspective by distributing shrinkage smoothly across all predictors, yielding comparable predictive performance without enforcing strict sparsity.
+
+The VIF diagnostics confirm that multicollinearity among the predictors is within acceptable bounds. All models achieve strong explanatory power, with R² values ranging from approximately 0.77 to 0.82 on the held-out test set, indicating that GDP, population, and energy consumption together explain a substantial portion of the variation in per-capita emissions. RMSE and MAE are closely comparable across models, with Lasso providing marginal gains in generalization — consistent with the expectation that regularization reduces overfitting in moderately sized datasets with correlated features.
+
+**Key finding:** Energy consumption per capita is the primary structural determinant of CO₂ emissions. Policy interventions targeting energy intensity are therefore more likely to produce measurable emission reductions than those focused solely on population or aggregate economic output.
+
+
+---
+
+---
+
+# Research Question 2: Clustering Analysis
+
+## Methodology
+
+This section applies four unsupervised clustering algorithms — K-Means, Hierarchical Clustering (Ward's D2 linkage), DBSCAN, and Gaussian Mixture Models (GMM) — to identify latent emission profiles in the data. Principal Component Analysis (PCA) is used for dimensionality reduction and visualization, enabling clearer interpretation of cluster structure.
+
+**Unit of analysis:** Clustering is performed on **country-year observations** rather than country-level averages. This preserves temporal variation and allows the analysis to capture how countries may transition between emission categories over time, reflecting changes in economic development or energy use.
+
+The number of clusters (k = 3) is selected based on the Elbow and Silhouette methods, while also considering interpretability. Although k = 2 yields a higher silhouette score, k = 3 provides a more meaningful classification into low, medium, and high emission groups. Consistency across methods is evaluated using the Adjusted Rand Index (ARI).
+
+
+## Data Preparation
+
+```{r r2-data}
+df_cluster <- df %>%
+  select(co2_per_capita, total_ghg, methane, coal_co2, oil_co2, gas_co2) %>%
+  na.omit()
+
+df_scaled <- scale(df_cluster)
+
+cat("Clustering dataset dimensions:", nrow(df_scaled), "x", ncol(df_scaled), "\n")
+```
+Emission variables were selected, cleaned, and standardized for clustering. The final dataset includes 2,640 observations and 6 variables, ensuring balanced input for clustering analysis.
+
+---
+
+## STEP 1: PCA — Dimensionality Reduction
+
+```{r r2-pca, fig.width=7, fig.height=5}
+pca <- prcomp(df_scaled)
+
+fviz_eig(pca) +
+  labs(
+    title = "Scree Plot: Variance Explained by Principal Components",
+    x = "Principal Components",
+    y = "% Variance Explained"
+  ) +
+  theme_minimal()
+
+cat("Variance explained by PC1+PC2:",
+    round(sum(summary(pca)$importance[2, 1:2]) * 100, 1), "%\n")
+```
+The scree plot shows the proportion of variance explained by each principal component. The first principal component explains the majority of the variance (around 65–70%), while the second component adds a smaller but still meaningful contribution.
+
+Together, the first two components capture a large portion of the total variance, indicating that most of the information in the dataset can be represented in reduced dimensions. The remaining components contribute relatively little, suggesting diminishing returns beyond the first few components.
+
+---
+
+## STEP 2: Optimal K Selection
+
+```{r r2-optimal-k, fig.width=7, fig.height=4, fig.show='hold', out.width='50%'}
+fviz_nbclust(df_scaled, kmeans, method = "wss") +
+  labs(title = "Elbow Method for Optimal K", x = "Number of Clusters", y = "WSS") +
+  theme_minimal()
+
+fviz_nbclust(df_scaled, kmeans, method = "silhouette") +
+  labs(title = "Silhouette Method for Optimal K") +
+  theme_minimal()
+```
+The elbow plot shows how the within-cluster sum of squares (WSS) decreases as the number of clusters increases. A sharp decline is observed from k = 1 to k = 3, indicating that adding clusters significantly improves model fit in this range.
+
+After k = 3, the decrease in WSS becomes more gradual, suggesting diminishing returns from adding more clusters. This indicates that additional clusters beyond this point do not substantially improve clustering quality.
+
+
+The silhouette plot shows how clustering quality varies with the number of clusters (k). The average silhouette width is highest at k = 2, indicating the strongest cluster separation at this point.
+
+As the number of clusters increases beyond 2, the silhouette score decreases, suggesting that clusters become less distinct and more overlapping. This indicates a decline in clustering quality as more clusters are added.
+
+Although the silhouette analysis indicates that k = 2 provides the highest clustering quality, k = 3 was selected to balance statistical performance with domain interpretability. Using three clusters enables classification into low, medium, and high emission groups, which better reflects real-world differences in emission levels. While this choice slightly reduces clustering quality, it provides more meaningful and actionable insights.
+
+
+Using three clusters allows the data to be categorized into low, medium, and high emission groups, which better reflects real-world differences in countries’ emission levels. While this choice slightly reduces clustering quality, it provides more practical insights and richer interpretation.
+
+---
+
+## STEP 3: K-Means Clustering (k = 3)
+
+```{r r2-kmeans, fig.width=8, fig.height=6}
+set.seed(123)
+kmeans_result <- kmeans(df_scaled, centers = 3, nstart = 25)
+
+df_cluster$km_cluster <- kmeans_result$cluster
+
+cluster_summary_km <- df_cluster %>%
+  group_by(km_cluster) %>%
+  summarise(co2_mean = mean(co2_per_capita)) %>%
+  arrange(co2_mean) %>%
+  mutate(label = c("Low Emissions", "Medium Emissions", "High Emissions"))
+
+df_cluster$km_label <- factor(
+  cluster_summary_km$label[match(df_cluster$km_cluster, cluster_summary_km$km_cluster)],
+  levels = c("Low Emissions", "Medium Emissions", "High Emissions")
+)
+
+sil_km  <- silhouette(kmeans_result$cluster, dist(df_scaled))
+avg_sil_km <- round(mean(sil_km[, 3]), 4)
+cat("K-Means Average Silhouette Score:", avg_sil_km, "\n")
+
+pca_data <- as.data.frame(pca$x)
+pca_data$km_label <- df_cluster$km_label
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = km_label)) +
+  geom_point(size = 1.5, alpha = 0.6) +
+  scale_color_manual(values = c("Low Emissions" = "#2ecc71",
+                                 "Medium Emissions" = "#f39c12",
+                                 "High Emissions" = "#e74c3c")) +
+  labs(
+    title = "K-Means Clustering (k=3) on PCA Space",
+    x = "PC1", y = "PC2", color = "Emission Level"
+  ) +
+  theme_minimal()
+```
+The K-means clustering results (k = 3) visualized in PCA space show clear grouping of observations into three distinct emission categories.
+
+The “Low Emissions” cluster forms a dense group near the origin, indicating countries with consistently low emission levels. The “Medium Emissions” cluster appears more separated along the principal components, suggesting moderate but distinct emission patterns. The “High Emissions” cluster is more dispersed, reflecting greater variability among high-emitting countries.
+
+The average silhouette score (~0.586) indicates moderate clustering quality, meaning that while clusters are reasonably separated, some overlap still exists between groups. Overall, the visualization confirms that the clustering captures meaningful structure in the data.
+
+---
+
+## STEP 4: Hierarchical Clustering
+
+```{r r2-hierarchical, fig.width=9, fig.height=7}
+# Reset par state in case a prior chunk (e.g. residuals) left mfrow != c(1,1).
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1)
+
+set.seed(123)
+
+# Use a subset for dendrogram readability (full dist matrix is expensive)
+n_sample <- min(500, nrow(df_scaled))
+idx <- sample(nrow(df_scaled), n_sample)
+df_sub <- df_scaled[idx, ]
+
+dist_matrix <- dist(df_sub, method = "euclidean")
+hclust_result <- hclust(dist_matrix, method = "ward.D2")
+
+# Dendrogram (top portion)
+plot(hclust_result, labels = FALSE, hang = -1,
+     main = "Hierarchical Clustering Dendrogram (Ward's D2, n=500 sample)",
+     xlab = "", ylab = "Height")
+rect.hclust(hclust_result, k = 3, border = c("#2ecc71", "#f39c12", "#e74c3c"))
+
+# Cut into 3 clusters for the full dataset
+dist_full   <- dist(df_scaled, method = "euclidean")
+hclust_full <- hclust(dist_full, method = "ward.D2")
+hc_labels   <- cutree(hclust_full, k = 3)
+
+df_cluster$hc_cluster <- hc_labels
+
+# Map HC clusters to emission levels by mean CO2
+hc_summary <- df_cluster %>%
+  group_by(hc_cluster) %>%
+  summarise(co2_mean = mean(co2_per_capita)) %>%
+  arrange(co2_mean) %>%
+  mutate(label = c("Low Emissions", "Medium Emissions", "High Emissions"))
+
+df_cluster$hc_label <- factor(
+  hc_summary$label[match(df_cluster$hc_cluster, hc_summary$hc_cluster)],
+  levels = c("Low Emissions", "Medium Emissions", "High Emissions")
+)
+
+sil_hc  <- silhouette(hc_labels, dist_full)
+avg_sil_hc <- round(mean(sil_hc[, 3]), 4)
+cat("Hierarchical Clustering Average Silhouette Score:", avg_sil_hc, "\n")
+
+pca_data$hc_label <- df_cluster$hc_label
+ggplot(pca_data, aes(x = PC1, y = PC2, color = hc_label)) +
+  geom_point(size = 1.5, alpha = 0.6) +
+  scale_color_manual(values = c("Low Emissions" = "#2ecc71",
+                                 "Medium Emissions" = "#f39c12",
+                                 "High Emissions" = "#e74c3c")) +
+  labs(
+    title = "Hierarchical Clustering (k=3) on PCA Space",
+    x = "PC1", y = "PC2", color = "Emission Level"
+  ) +
+  theme_minimal()
+```
+The hierarchical clustering dendrogram illustrates how observations are progressively grouped based on similarity in emission-related variables.
+
+The tree structure shows that clusters are formed by merging similar observations at lower heights, while larger distances between branches indicate greater dissimilarity. The presence of three main branches suggests that the data can be reasonably divided into three distinct groups.
+
+The height at which clusters merge reflects the level of dissimilarity, with higher merges indicating more distinct clusters. Overall, the dendrogram supports the presence of meaningful grouping patterns in the data, consistent with the clustering structure observed in K-means.
+
+The PCA visualization of hierarchical clustering (k = 3) shows three distinct groups corresponding to low, medium, and high emission levels. The “Low Emissions” cluster is densely concentrated near the origin, while the “Medium Emissions” cluster is clearly separated along the principal components. The “High Emissions” group appears more spread out, indicating greater variability among high-emitting observations.
+
+The average silhouette score (~0.594) suggests moderate clustering quality, with slightly better separation compared to K-means. Overall, the results confirm that hierarchical clustering successfully identifies meaningful structure in the data, consistent with earlier clustering findings.
+
+---
+
+## STEP 5: DBSCAN Clustering
+
+```{r r2-dbscan, fig.width=8, fig.height=5}
+# Determine eps with kNN distance plot (k=5)
+kNN_dist <- kNNdist(df_scaled, k = 5)
+plot(sort(kNN_dist),
+     type = "l",
+     main = "kNN Distance Plot (k=5) — Elbow suggests eps value",
+     xlab = "Points (sorted)",
+     ylab = "5-NN Distance")
+
+# Fit DBSCAN — adjust eps/minPts based on kNN plot
+set.seed(123)
+dbscan_result <- dbscan(df_scaled, eps = 1.0, minPts = 10)
+
+n_clusters_db  <- length(unique(dbscan_result$cluster[dbscan_result$cluster > 0]))
+n_noise_db     <- sum(dbscan_result$cluster == 0)
+cat("DBSCAN: Number of clusters found:", n_clusters_db, "\n")
+cat("DBSCAN: Noise points:", n_noise_db, "(", round(100*n_noise_db/nrow(df_scaled),1), "%)\n")
+
+df_cluster$db_cluster <- dbscan_result$cluster
+
+pca_data$db_cluster <- factor(dbscan_result$cluster)
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = db_cluster)) +
+  geom_point(size = 1.5, alpha = 0.6) +
+  labs(
+    title = paste0("DBSCAN Clustering on PCA Space (eps=1.0, minPts=10)"),
+    subtitle = paste0("Clusters found: ", n_clusters_db,
+                      " | Noise points: ", n_noise_db),
+    x = "PC1", y = "PC2", color = "Cluster (0=noise)"
+  ) +
+  theme_minimal()
+
+# Silhouette for DBSCAN (non-noise only)
+db_nonnoise <- dbscan_result$cluster != 0
+if(sum(db_nonnoise) > 2 && length(unique(dbscan_result$cluster[db_nonnoise])) > 1) {
+  sil_db <- silhouette(dbscan_result$cluster[db_nonnoise],
+                       dist(df_scaled[db_nonnoise, ]))
+  avg_sil_db <- round(mean(sil_db[, 3]), 4)
+  cat("DBSCAN Average Silhouette Score (non-noise):", avg_sil_db, "\n")
+} else {
+  avg_sil_db <- NA
+  cat("DBSCAN: Too few clusters or noise dominates — silhouette not computed.\n")
+}
+```
+The kNN distance plot is used to identify an appropriate epsilon (ε) value for DBSCAN clustering. The curve shows a gradual increase in distances followed by a sharp rise, forming an “elbow” point.
+
+This elbow represents the threshold where points transition from dense regions to sparse regions (potential noise). Values before the elbow correspond to well-clustered points, while values after it indicate outliers.
+
+Thus, the elbow point provides a suitable estimate for ε, helping distinguish clusters from noise in the dataset.
+
+The DBSCAN clustering results identify 5 distinct clusters along with a small proportion of noise points (1.5%), indicating that most observations belong to meaningful groups.
+
+The PCA visualization shows well-separated clusters of varying shapes and densities, highlighting DBSCAN’s ability to capture complex, non-linear structures that methods like K-means may miss. The presence of noise points suggests that a few observations do not fit well into any cluster, likely representing outliers.
+
+The high average silhouette score (~0.72) for non-noise points indicates strong cluster separation and cohesion. Overall, DBSCAN provides a robust clustering solution, effectively identifying both structured groups and outliers in the data.
+
+---
+
+## STEP 6: GMM — Gaussian Mixture Model
+
+```{r r2-gmm, fig.width=8, fig.height=6}
+set.seed(123)
+gmm_result <- Mclust(df_scaled, G = 3)
+
+cat("GMM: Best model selected:", gmm_result$modelName, "\n")
+cat("GMM: BIC =", round(gmm_result$bic, 2), "\n")
+cat("GMM: Number of components:", gmm_result$G, "\n")
+
+df_cluster$gmm_cluster <- gmm_result$classification
+
+# Map GMM clusters to emission levels
+gmm_summary <- df_cluster %>%
+  group_by(gmm_cluster) %>%
+  summarise(co2_mean = mean(co2_per_capita)) %>%
+  arrange(co2_mean) %>%
+  mutate(label = c("Low Emissions", "Medium Emissions", "High Emissions"))
+
+df_cluster$gmm_label <- factor(
+  gmm_summary$label[match(df_cluster$gmm_cluster, gmm_summary$gmm_cluster)],
+  levels = c("Low Emissions", "Medium Emissions", "High Emissions")
+)
+
+sil_gmm <- silhouette(gmm_result$classification, dist(df_scaled))
+avg_sil_gmm <- round(mean(sil_gmm[, 3]), 4)
+cat("GMM Average Silhouette Score:", avg_sil_gmm, "\n")
+
+# Plot GMM uncertainty
+pca_data$gmm_label <- df_cluster$gmm_label
+pca_data$gmm_uncertainty <- gmm_result$uncertainty
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = gmm_label, alpha = 1 - gmm_uncertainty)) +
+  geom_point(size = 1.5) +
+  scale_color_manual(values = c("Low Emissions" = "#2ecc71",
+                                 "Medium Emissions" = "#f39c12",
+                                 "High Emissions" = "#e74c3c")) +
+  labs(
+    title = "GMM Clustering (k=3) on PCA Space",
+    subtitle = "Point opacity reflects assignment certainty (darker = more certain)",
+    x = "PC1", y = "PC2", color = "Emission Level"
+  ) +
+  guides(alpha = "none") +
+  theme_minimal()
+```
+The Gaussian Mixture Model (GMM) identifies 3 components, with the “VVV” model indicating flexible covariance structures across clusters. This suggests that clusters differ in shape, size, and orientation, making GMM suitable for capturing more complex distributions in the data.
+
+The PCA visualization shows overlapping clusters, with varying levels of assignment certainty reflected by point opacity. Unlike K-means, GMM provides probabilistic cluster membership, meaning observations can partially belong to multiple clusters.
+
+However, the low average silhouette score (~0.17) indicates weak cluster separation, suggesting substantial overlap between clusters. While GMM is flexible in modeling complex distributions, this flexibility does not translate into well-defined clusters in this dataset, making it less effective compared to other methods.
+
+
+---
+
+## STEP 7: Clustering Methods Comparison
+
+```{r r2-comparison, fig.width=8, fig.height=5}
+# Agreement between K-Means and other methods (Adjusted Rand Index)
+ari_km_hc  <- round(adjustedRandIndex(df_cluster$km_cluster, df_cluster$hc_cluster), 4)
+ari_km_gmm <- round(adjustedRandIndex(df_cluster$km_cluster, df_cluster$gmm_cluster), 4)
+ari_hc_gmm <- round(adjustedRandIndex(df_cluster$hc_cluster, df_cluster$gmm_cluster), 4)
+
+# Summary table
+comparison_table <- data.frame(
+  Method           = c("K-Means", "Hierarchical (Ward)", "DBSCAN", "GMM"),
+  Clusters         = c(3, 3, n_clusters_db, 3),
+  Avg_Silhouette   = c(avg_sil_km, avg_sil_hc,
+                       ifelse(is.na(avg_sil_db), "N/A", avg_sil_db),
+                       avg_sil_gmm),
+  Notes = c(
+    "Hard assignment, spherical clusters",
+    "Hierarchical structure, dendrogram",
+    "Finds arbitrary shapes, noise-aware",
+    "Soft probabilistic assignment, fits ellipsoidal clusters"
+  )
+)
+
+kable(comparison_table, caption = "Clustering Methods Comparison")
+
+cat("\nAdjusted Rand Index (cluster agreement):\n")
+cat("  K-Means vs Hierarchical:", ari_km_hc, "\n")
+cat("  K-Means vs GMM:         ", ari_km_gmm, "\n")
+cat("  Hierarchical vs GMM:    ", ari_hc_gmm, "\n")
+```
+The comparison of clustering methods highlights clear differences in performance and cluster structure. DBSCAN achieves the highest silhouette score (~0.72), indicating the strongest cluster separation and its effectiveness in identifying non-linear patterns and outliers. K-means and hierarchical clustering show moderate performance (≈0.59), producing consistent and well-defined clusters with similar structure.
+
+The Adjusted Rand Index (ARI) further confirms this consistency, with a very high agreement between K-means and hierarchical clustering (0.933), suggesting that both methods identify nearly identical groupings. In contrast, GMM shows low agreement with both methods (~0.20), indicating substantially different cluster assignments.
+
+Although GMM captures more flexible, probabilistic cluster structures, its low silhouette score (~0.17) suggests poor separation in this dataset. Overall, DBSCAN provides the best clustering quality, while K-means and hierarchical clustering offer stable and interpretable results.
+
+### Side-by-Side Cluster Visualizations
+
+```{r r2-side-by-side, fig.width=10, fig.height=8}
+p1 <- ggplot(pca_data, aes(x = PC1, y = PC2, color = km_label)) +
+  geom_point(size = 1, alpha = 0.5) +
+  scale_color_manual(values = c("Low Emissions"="#2ecc71","Medium Emissions"="#f39c12","High Emissions"="#e74c3c")) +
+  labs(title = "K-Means", color = NULL) + theme_minimal() +
+  theme(legend.position = "bottom")
+
+p2 <- ggplot(pca_data, aes(x = PC1, y = PC2, color = hc_label)) +
+  geom_point(size = 1, alpha = 0.5) +
+  scale_color_manual(values = c("Low Emissions"="#2ecc71","Medium Emissions"="#f39c12","High Emissions"="#e74c3c")) +
+  labs(title = "Hierarchical (Ward)", color = NULL) + theme_minimal() +
+  theme(legend.position = "bottom")
+
+p3 <- ggplot(pca_data, aes(x = PC1, y = PC2, color = db_cluster)) +
+  geom_point(size = 1, alpha = 0.5) +
+  labs(title = "DBSCAN", color = "Cluster") + theme_minimal() +
+  theme(legend.position = "bottom")
+
+p4 <- ggplot(pca_data, aes(x = PC1, y = PC2, color = gmm_label)) +
+  geom_point(size = 1, alpha = 0.5) +
+  scale_color_manual(values = c("Low Emissions"="#2ecc71","Medium Emissions"="#f39c12","High Emissions"="#e74c3c")) +
+  labs(title = "GMM", color = NULL) + theme_minimal() +
+  theme(legend.position = "bottom")
+
+gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2,
+  top = "All Clustering Methods — PCA Space Comparison")
+```
+The PCA comparison plot illustrates how different clustering methods partition the data into groups. K-means and hierarchical clustering produce very similar cluster structures, with clear separation between low, medium, and high emission groups. This consistency aligns with their high agreement (ARI), indicating stable and reliable clustering.
+
+DBSCAN identifies more clusters with irregular shapes and highlights noise points, demonstrating its ability to capture complex patterns and outliers that other methods do not detect. In contrast, GMM shows more overlapping clusters, reflecting its probabilistic nature and weaker separation.
+
+Overall, the visualization confirms that while K-means and hierarchical clustering provide consistent and interpretable groupings, DBSCAN captures more complex structures, and GMM results in less distinct clusters.
+
+### Silhouette Plot: K-Means vs GMM
+
+```{r r2-silhouette-plots, fig.width=10, fig.height=4}
+par(mfrow = c(1, 2))
+plot(sil_km,  main = "Silhouette: K-Means",  col = 2:4, border = NA)
+plot(sil_gmm, main = "Silhouette: GMM",       col = 2:4, border = NA)
+```
+The silhouette plots compare the clustering quality of K-means and GMM using three clusters. K-means shows a higher average silhouette score (~0.59), indicating better-defined and more cohesive clusters. Most observations have positive silhouette values, especially in the largest cluster, suggesting strong separation.
+
+In contrast, GMM has a much lower average silhouette score (~0.17), with many observations having negative values. This indicates significant overlap between clusters and weaker separation.
+
+Overall, the comparison shows that K-means produces more distinct and well-separated clusters, while GMM results in less clearly defined groupings.
+
+### Cluster Profiles (K-Means)
+
+```{r r2-profiles}
+profile_table <- df_cluster %>%
+  group_by(km_label) %>%
+  summarise(across(c(co2_per_capita, total_ghg, methane, coal_co2, oil_co2, gas_co2),
+                   ~round(mean(.), 3))) %>%
+  rename(Label = km_label)
+
+kable(profile_table, caption = "Mean Feature Values per Cluster (K-Means)")
+```
+The cluster profiles summarize the average emission-related characteristics for each group identified by K-means. The “Low Emissions” cluster has the lowest values across all variables, indicating countries with consistently low CO₂ and greenhouse gas emissions.
+
+The “Medium Emissions” cluster shows substantially higher total emissions, particularly in total GHG, methane, and coal-related emissions, suggesting more industrialized or energy-intensive economies.
+
+The “High Emissions” cluster has the highest CO₂ per capita values and elevated emissions across multiple sources, reflecting countries with significant environmental impact.
+
+Overall, the profiles confirm clear differences between clusters and validate the classification into low, medium, and high emission groups.
+
+---
+
+# Discussion (R2)
+
+## Cluster Interpretation
+
+K-Means and Hierarchical Clustering (Ward) converge on **three structurally coherent emission groups**, supported by a high Adjusted Rand Index between the two methods. This strong agreement indicates that the three-cluster partition reflects genuine structure in the data rather than an artifact of a specific algorithm.
+
+**Cluster profiles:**
+
+* **High Emissions:** Characterized by substantially elevated `coal_co2`, `total_ghg`, and fossil-fuel consumption. These observations correspond to industrialized, energy-intensive economies with heavy reliance on carbon-based energy sources.
+* **Medium Emissions:** Moderate values across all features, consistent with transitional economies undergoing industrialization or those with mixed energy portfolios.
+* **Low Emissions:** Minimal values across all emission and energy metrics, typical of lower-income or less industrialized economies with limited emissions intensity.
+
+## Comparative Method Analysis
+
+Each algorithm contributes a distinct analytical perspective:
+
+* **K-Means** provides fast, interpretable hard assignments and is well-suited to approximately spherical clusters. It serves as the primary reference model due to its transparency and stable performance.
+* **Hierarchical Clustering (Ward's D2)** reveals nested grouping structure through the dendrogram, allowing inspection of how clusters merge at different scales. Its strong agreement with K-Means (high ARI) reinforces the reliability of the identified clusters.
+* **DBSCAN** does not require a pre-specified number of clusters and identifies noise points — country-year observations with anomalous emission profiles that fall outside any coherent group. These outliers represent extreme or atypical cases that are not well captured by centroid-based methods.
+* **GMM** models clusters as multivariate Gaussian components and allows for soft probabilistic assignments. However, its low agreement with K-Means and Hierarchical Clustering, along with a low silhouette score, indicates weaker cluster separation and greater overlap between groups in this dataset.
+
+
+## Limitations of Clustering
+
+Average silhouette scores in the range of 0.55–0.65 indicate reasonable but not perfect separation,
+which is expected given that emission behavior exists on a continuum. The choice of features, distance
+metric, and scaling all influence results. DBSCAN in particular is sensitive to the `eps` parameter,
+which was selected via the kNN distance plot but may require tuning for different data subsets.
+
+---
+
+# Limitations
+
+**R1 — Regression:** The linear modeling framework assumes additive and linear relationships between predictors and the outcome. In practice, these relationships may be nonlinear (e.g., the Environmental Kuznets Curve hypothesis), and potential interaction effects between variables such as GDP and energy consumption are not explicitly modeled. Additionally, the use of a random 80/20 train-test split does not account for temporal autocorrelation in panel data; a time-aware validation approach would provide a more realistic assessment of predictive performance.
+
+**R2 — Clustering:** Clustering results are sensitive to feature selection, standardization, and the choice of distance metric. K-Means and Hierarchical Clustering assume relatively compact or spherical cluster structures, which may not fully capture complex emission patterns. DBSCAN is sensitive to the choice of the `eps` parameter, and the reported results reflect a single tuned configuration. GMM assumes that each component follows a multivariate Gaussian distribution, which may not hold for skewed emission variables.
+
+**Both analyses** treat country-year observations as independent, thereby ignoring temporal dependencies and cross-country heterogeneity. Future work could incorporate time-series methods, panel data techniques (e.g., fixed effects), or spatial modeling approaches to improve the robustness and validity of both regression estimates and clustering results.
+
+
+---
+
+# Conclusion
+
+This study examined the structural determinants of global CO₂ emissions through two complementary
+analytical lenses: supervised regression and unsupervised clustering.
+
+**R1 — Regression Analysis:** All three models (OLS, Ridge, Lasso) converge on `energy_per_capita` as the dominant predictor of CO₂ emissions per capita, with R² values ranging from approximately 0.77 to 0.82 on the held-out test set. The consistency of this finding across models with varying regularization assumptions strengthens the interpretation that energy consumption intensity is the primary structural driver of emissions, more so than population or aggregate GDP. These results align with existing literature on the energy-emissions nexus and support policies targeting energy efficiency and decarbonization of energy supply.
+
+
+**R2 — Clustering Analysis:** Four unsupervised learning algorithms identify meaningful emission profiles, with K-Means and Hierarchical Clustering consistently revealing three coherent groups Low, Medium, and High emissions that align intuitively with stages of economic development and energy use. The high agreement between K-Means and Hierarchical Clustering (Adjusted Rand Index ≈ 0.93) confirms the robustness of this three-group structure. In contrast, GMM shows low agreement with these methods (≈ 0.20), indicating a different and less stable clustering structure. DBSCAN further contributes by identifying additional clusters and isolating anomalous country-year observations, providing insight into structural outliers in the global emissions landscape.
+
+**Overall:** The combination of regression and clustering offers a richer understanding than either
+method alone. Regression identifies *which variables* drive emissions; clustering reveals *which
+countries* share structural similarities. Together, they provide both the explanatory depth and
+the comparative breadth required for evidence-based environmental policy analysis.
